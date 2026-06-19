@@ -15,7 +15,7 @@ let nseCookie = "";
 let nseCookieStoredAt = 0;
 const nseCookieMs = 15 * 60 * 1000;
 
-export async function fetchIndianInsiderTradeFilings({ fromDate, toDate }) {
+export async function fetchIndianInsiderTradeFilings({ fromDate, toDate, signal }) {
   const from = validDate(fromDate);
   const to = validDate(toDate);
   if (!from || !to || from > to) throw new Error("A valid insider filing date range is required");
@@ -25,12 +25,12 @@ export async function fetchIndianInsiderTradeFilings({ fromDate, toDate }) {
   const [nseResult, bseResult] = await Promise.allSettled([
     fetchWindows(ranges, ({ from: start, to: end }) => {
       const params = new URLSearchParams({ index: "equities", from_date: exchangeDate(start, "-"), to_date: exchangeDate(end, "-") });
-      return cachedJson(`nse:insiders:filings:${start}:${end}`, `${nseBaseUrl}/corporates-pit?${params}`, { nse: true });
-    }),
+      return cachedJson(`nse:insiders:filings:${start}:${end}`, `${nseBaseUrl}/corporates-pit?${params}`, { nse: true, signal });
+    }, signal),
     fetchWindows(ranges, ({ from: start, to: end }) => {
       const params = new URLSearchParams({ fromdt: exchangeDate(start, "/"), todt: exchangeDate(end, "/"), pageno: "1", scripcode: "" });
-      return cachedJson(`bse:insiders:filings:${start}:${end}`, `${bseBaseUrl}/InsiderTrade15/w?${params}`, { headers: bseHeaders });
-    }),
+      return cachedJson(`bse:insiders:filings:${start}:${end}`, `${bseBaseUrl}/InsiderTrade15/w?${params}`, { headers: bseHeaders, signal });
+    }, signal),
   ]);
   if (nseResult.status === "rejected" && bseResult.status === "rejected") {
     throw new Error(`NSE and BSE insider sources failed. NSE: ${nseResult.reason.message}. BSE: ${bseResult.reason.message}`);
@@ -54,23 +54,35 @@ export async function fetchIndianInsiderTradeFilings({ fromDate, toDate }) {
   };
 }
 
-async function fetchWindows(ranges, fetchWindow) {
+async function fetchWindows(ranges, fetchWindow, signal) {
   const payloads = [];
   for (const range of ranges) {
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
+      signal?.throwIfAborted();
       try {
         payloads.push(await fetchWindow(range));
         lastError = null;
         break;
       } catch (error) {
         lastError = error;
-        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+        if (signal?.aborted) throw error;
+        if (attempt < 3) await abortableDelay(attempt * 500, signal);
       }
     }
     if (lastError) throw new Error(`Insider filing window ${range.from} to ${range.to} failed after 3 attempts: ${lastError.message}`);
   }
   return payloads;
+}
+
+function abortableDelay(milliseconds, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, milliseconds);
+    function done() { signal?.removeEventListener("abort", aborted); resolve(); }
+    function aborted() { clearTimeout(timer); reject(signal.reason || new Error("Operation aborted")); }
+    if (signal?.aborted) aborted();
+    else signal?.addEventListener("abort", aborted, { once: true });
+  });
 }
 
 async function cachedJson(key, url, options = {}) {
@@ -79,7 +91,7 @@ async function cachedJson(key, url, options = {}) {
   if (inFlight.has(key)) return inFlight.get(key);
   const request = (async () => {
     const data = options.nse
-      ? await fetchNseJson(url)
+      ? await fetchNseJson(url, options.signal)
       : await fetchJson(url, options);
     cache.set(key, { data, storedAt: Date.now() });
     return data;
@@ -88,21 +100,21 @@ async function cachedJson(key, url, options = {}) {
   try { return await request; } finally { inFlight.delete(key); }
 }
 
-async function fetchNseJson(url) {
-  await refreshNseCookie(false);
-  let response = await fetchWithTimeout(url, { headers: nseHeaders() });
+async function fetchNseJson(url, signal) {
+  await refreshNseCookie(false, signal);
+  let response = await fetchWithTimeout(url, { headers: nseHeaders(), signal });
   if (response.status === 401 || response.status === 403) {
-    await refreshNseCookie(true);
-    response = await fetchWithTimeout(url, { headers: nseHeaders() });
+    await refreshNseCookie(true, signal);
+    response = await fetchWithTimeout(url, { headers: nseHeaders(), signal });
   }
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
 
-async function refreshNseCookie(force) {
+async function refreshNseCookie(force, signal) {
   if (!force && nseCookie && Date.now() - nseCookieStoredAt < nseCookieMs) return;
   const response = await fetchWithTimeout("https://www.nseindia.com/", {
-    headers: { ...browserHeaders, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+    headers: { ...browserHeaders, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" }, signal,
   });
   if (!response.ok) throw new Error(`NSE session bootstrap failed with HTTP ${response.status}`);
   nseCookie = readCookies(response.headers);
@@ -133,10 +145,14 @@ async function fetchJson(url, options) {
 async function fetchWithTimeout(url, options) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const abort = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) abort();
+  else options.signal?.addEventListener("abort", abort, { once: true });
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
   }
 }
 

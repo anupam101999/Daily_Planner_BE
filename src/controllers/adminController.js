@@ -1,8 +1,13 @@
 import { pool } from "../config/database.js";
-import { getBatches, runBatch } from "../services/batchService.js";
+import { getBatches, runBatch, saveBatchSchedule } from "../services/batchService.js";
+import { rescheduleBatch, validateCronExpression } from "../services/batchSchedulerService.js";
 
-export function getAdminBatches(_request, response) {
-  response.json({ batches: getBatches() });
+export async function getAdminBatches(_request, response, next) {
+  try {
+    response.json({ batches: await getBatches() });
+  } catch (error) {
+    next(error);
+  }
 }
 
 export async function runAdminBatch(request, response, next) {
@@ -16,7 +21,27 @@ export async function runAdminBatch(request, response, next) {
       response.status(409).json({ error: "This batch process is already running" });
       return;
     }
-    response.json({ batchId: request.params.batchId, completedAt: new Date().toISOString(), result: outcome.result, batches: getBatches() });
+    response.json({ batchId: request.params.batchId, completedAt: new Date().toISOString(), result: outcome.result, batches: await getBatches() });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateAdminBatchSchedule(request, response, next) {
+  try {
+    const cronExpression = String(request.body?.cronExpression || "").trim();
+    const enabled = request.body?.enabled !== false;
+    if (!validateCronExpression(cronExpression)) {
+      response.status(400).json({ error: "Enter a valid batch schedule", code: "INVALID_BATCH_SCHEDULE" });
+      return;
+    }
+    const result = await saveBatchSchedule(request.params.batchId, { cronExpression, enabled });
+    if (!result.found) {
+      response.status(404).json({ error: "Batch process not found" });
+      return;
+    }
+    await rescheduleBatch(request.params.batchId);
+    response.json({ batches: await getBatches() });
   } catch (error) {
     next(error);
   }

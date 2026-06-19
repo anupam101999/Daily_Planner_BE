@@ -37,16 +37,23 @@ export async function syncInsiderTradesFeature(request, response, next) {
 
 export async function backfillInsiderTradesFeature(request, response, next) {
   try {
+    const now = new Date();
+    const currentYear = now.getUTCFullYear();
+    const currentMonth = now.getUTCMonth() + 1;
     const fromYear = Number(request.body?.fromYear ?? 2015);
-    const toYear = Number(request.body?.toYear ?? new Date().getUTCFullYear());
-    if (!Number.isInteger(fromYear) || !Number.isInteger(toYear) || fromYear < 2015 || toYear < fromYear) {
+    const fromMonth = Number(request.body?.fromMonth ?? 1);
+    const toYear = Number(request.body?.toYear ?? currentYear);
+    const toMonth = Number(request.body?.toMonth ?? (toYear === currentYear ? currentMonth : 12));
+    const invalidRange = toYear < fromYear || (toYear === fromYear && toMonth < fromMonth);
+    const futureRange = fromYear > currentYear || toYear > currentYear || (fromYear === currentYear && fromMonth > currentMonth) || (toYear === currentYear && toMonth > currentMonth);
+    if (!Number.isInteger(fromYear) || !Number.isInteger(toYear) || !Number.isInteger(fromMonth) || !Number.isInteger(toMonth) || fromYear < 2015 || fromMonth < 1 || fromMonth > 12 || toMonth < 1 || toMonth > 12 || invalidRange || futureRange) {
       response.status(400).json({
-        error: "fromYear and toYear must be valid years, with toYear greater than or equal to fromYear",
+        error: "Enter a valid start and end month between 2015 and the current date",
         code: "INVALID_INSIDER_BACKFILL_RANGE",
       });
       return;
     }
-    const result = await queueInsiderTradeBackfill({ fromYear, toYear });
+    const result = await queueInsiderTradeBackfill({ fromYear, fromMonth, toYear, toMonth });
     if (!result.accepted) {
       response.status(409).json({ error: "An insider backfill is already running", code: "INSIDER_BACKFILL_ALREADY_RUNNING", ...result });
       return;

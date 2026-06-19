@@ -254,7 +254,9 @@ export async function initDatabase() {
       status text not null default 'idle',
       current_label text not null default '',
       from_year integer,
+      from_month integer,
       to_year integer,
+      to_month integer,
       total_windows integer not null default 0,
       completed_windows integer not null default 0,
       failed_windows integer not null default 0,
@@ -270,7 +272,9 @@ export async function initDatabase() {
     alter table fin_insider_sync_state add column if not exists status text not null default 'idle';
     alter table fin_insider_sync_state add column if not exists current_label text not null default '';
     alter table fin_insider_sync_state add column if not exists from_year integer;
+    alter table fin_insider_sync_state add column if not exists from_month integer;
     alter table fin_insider_sync_state add column if not exists to_year integer;
+    alter table fin_insider_sync_state add column if not exists to_month integer;
     alter table fin_insider_sync_state add column if not exists total_windows integer not null default 0;
     alter table fin_insider_sync_state add column if not exists completed_windows integer not null default 0;
     alter table fin_insider_sync_state add column if not exists failed_windows integer not null default 0;
@@ -283,6 +287,13 @@ export async function initDatabase() {
 
     create index if not exists fin_insider_sync_state_status_idx
       on fin_insider_sync_state (status, updated_at desc);
+
+    create table if not exists daily_batch_schedule (
+      batch_id text primary key,
+      cron_expression text not null,
+      enabled boolean not null default true,
+      updated_at timestamptz not null default now()
+    );
 
     alter table fin_insider_trade add column if not exists holding_before_percent numeric(12, 6);
     alter table fin_insider_trade add column if not exists holding_after_percent numeric(12, 6);

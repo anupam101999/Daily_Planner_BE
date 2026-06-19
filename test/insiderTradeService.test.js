@@ -26,3 +26,18 @@ test("historical backfill uses calendar month windows", () => {
     { from: "2026-03-01", to: "2026-03-18" },
   ]);
 });
+
+test("historical backfill respects selected start and end months", () => {
+  assert.deepEqual(utils.backfillMonthWindows({ fromYear: 2025, fromMonth: 11, toYear: 2026, toMonth: 2, today: "2026-06-19" }), [
+    { from: "2025-11-01", to: "2025-11-30" },
+    { from: "2025-12-01", to: "2025-12-31" },
+    { from: "2026-01-01", to: "2026-01-31" },
+    { from: "2026-02-01", to: "2026-02-28" },
+  ]);
+});
+
+test("historical backfill caps the selected current month at today", () => {
+  assert.deepEqual(utils.backfillMonthWindows({ fromYear: 2026, fromMonth: 6, toYear: 2026, toMonth: 12, today: "2026-06-19" }), [
+    { from: "2026-06-01", to: "2026-06-19" },
+  ]);
+});
