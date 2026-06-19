@@ -1,9 +1,11 @@
 import cron from "node-cron";
-import { refreshAllFinanceQuotesForAllUsers } from "../controllers/financeController.js";
+import { runBatch } from "./batchService.js";
 
 async function runFinanceQuoteSync() {
   try {
-    const result = await refreshAllFinanceQuotesForAllUsers();
+    const outcome = await runBatch("finance-quotes");
+    if (!outcome.accepted) return;
+    const result = outcome.result;
     console.log(`Finance quote sync completed: ${result.updated}/${result.checked} quote(s) updated, ${result.failed} failed`);
   } catch (error) {
     console.error("Finance quote sync failed", error);

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { pool } from "../config/database.js";
-import { fetchIndianInsiderTradeFilings } from "./marketIntelligenceService.js";
+import { fetchIndianInsiderTradeFilings } from "./insiderTradeSourceService.js";
 
 const syncLockId = 724061923;
 const earliestBackfillYear = 2015;
@@ -52,7 +52,7 @@ export async function queueInsiderTradeBackfill({ fromYear, toYear }) {
       await markBackfillStopped("failed", error.message);
     }
   });
-  return { accepted: true, status: "queued", fromYear, toYear, statusEndpoint: "/api/finance/market-intelligence/insider-trades/backfill/status" };
+  return { accepted: true, status: "queued", fromYear, toYear, statusEndpoint: "/api/finance/insider-trades/backfill/status" };
 }
 
 export async function getInsiderTradeBackfillStatus() {

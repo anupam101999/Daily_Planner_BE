@@ -1,27 +1,5 @@
 import { pool } from "../config/database.js";
-import { clearMarketIntelligenceCache, getMarketIntelligence } from "../services/marketIntelligenceService.js";
 import { getInsiderTradeBackfillStatus, getStoredInsiderTrades, queueInsiderTradeBackfill, syncRecentInsiderTrades } from "../services/insiderTradeService.js";
-
-export async function getMarketIntelligenceFeature(request, response, next) {
-  try {
-    if (request.query.refresh === "true") clearMarketIntelligenceCache();
-    const result = await pool.query(
-      `select id::text, name, symbol, exchange, sector from fin_asset where user_id = $1 order by updated_at desc`,
-      [request.dailyUserId],
-    );
-    const currentYear = new Date().getUTCFullYear();
-    const [intelligence, marketInsiders, portfolioInsiders] = await Promise.all([
-      getMarketIntelligence(result.rows, { country: request.query.country || "IN" }),
-      getStoredInsiderTrades({ year: currentYear, page: 1, pageSize: 50 }),
-      getStoredInsiderTrades({ year: currentYear, symbols: result.rows.map((row) => row.symbol), companyNames: result.rows.map((row) => row.name), page: 1, pageSize: 50 }),
-    ]);
-    intelligence.insiderTrades = { market: marketInsiders.rows, portfolio: portfolioInsiders.rows };
-    intelligence.sources.insiderTradesDatabase = { ok: true, available: true, total: marketInsiders.total };
-    response.json(intelligence);
-  } catch (error) {
-    next(error);
-  }
-}
 
 export async function getInsiderTradesFeature(request, response, next) {
   try {
@@ -47,7 +25,7 @@ export async function syncInsiderTradesFeature(request, response, next) {
       response.status(400).json({
         error: "Historical year ranges must use the insider-trades/backfill endpoint",
         code: "INSIDER_BACKFILL_ENDPOINT_REQUIRED",
-        endpoint: "/api/finance/market-intelligence/insider-trades/backfill",
+        endpoint: "/api/finance/insider-trades/backfill",
       });
       return;
     }

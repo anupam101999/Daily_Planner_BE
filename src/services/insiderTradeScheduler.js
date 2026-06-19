@@ -1,9 +1,11 @@
 import cron from "node-cron";
-import { syncRecentInsiderTrades } from "./insiderTradeService.js";
+import { runBatch } from "./batchService.js";
 
 async function runInsiderTradeSync() {
   try {
-    const result = await syncRecentInsiderTrades();
+    const outcome = await runBatch("insider-trades");
+    if (!outcome.accepted) return;
+    const result = outcome.result;
     if (result.skipped) {
       console.log(`Insider disclosure sync skipped: ${result.reason}`);
       return;

@@ -1,10 +1,11 @@
 import cron from "node-cron";
-import { rolloverIncompleteTasks } from "./taskRolloverService.js";
+import { runBatch } from "./batchService.js";
 
 async function runDailyTaskRollover() {
   try {
-    const result = await rolloverIncompleteTasks();
-    console.log(`Daily task rollover completed: ${result.movedCount} task(s) moved to ${result.date}`);
+    const outcome = await runBatch("task-rollover");
+    if (!outcome.accepted) return;
+    console.log(`Daily task rollover completed: ${outcome.result.movedCount} task(s) moved to ${outcome.result.date}`);
   } catch (error) {
     console.error("Daily task rollover failed", error);
   }

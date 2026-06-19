@@ -1,4 +1,26 @@
 import { pool } from "../config/database.js";
+import { getBatches, runBatch } from "../services/batchService.js";
+
+export function getAdminBatches(_request, response) {
+  response.json({ batches: getBatches() });
+}
+
+export async function runAdminBatch(request, response, next) {
+  try {
+    const outcome = await runBatch(request.params.batchId);
+    if (!outcome.found) {
+      response.status(404).json({ error: "Batch process not found" });
+      return;
+    }
+    if (!outcome.accepted) {
+      response.status(409).json({ error: "This batch process is already running" });
+      return;
+    }
+    response.json({ batchId: request.params.batchId, completedAt: new Date().toISOString(), result: outcome.result, batches: getBatches() });
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function getAdminInsights(_request, response, next) {
   try {
