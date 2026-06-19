@@ -30,7 +30,7 @@ export async function queueInsiderTradeBackfill({ fromYear, toYear }) {
        to_year = excluded.to_year, total_windows = 0, completed_windows = 0, failed_windows = 0,
        progress_received = 0, progress_inserted = 0, progress_updated = 0, progress_ignored = 0,
        last_error = '', started_at = now(), completed_at = null, updated_at = now()
-     where fin_insider_sync_state.status not in ('queued', 'running')
+     where fin_insider_sync_state.status not in ('queued', 'running', 'cancelling')
      returning id`,
     [fromYear, toYear],
   );
@@ -38,8 +38,16 @@ export async function queueInsiderTradeBackfill({ fromYear, toYear }) {
   setImmediate(async () => {
     try {
       for (let attempt = 1; attempt <= 40; attempt += 1) {
+        if (await isBackfillCancellationRequested()) {
+          await markBackfillStopped("cancelled", "Terminated by admin");
+          return;
+        }
         const backfill = await backfillInsiderTrades({ fromYear, toYear });
         if (!backfill.skipped) return;
+        if (await isBackfillCancellationRequested()) {
+          await markBackfillStopped("cancelled", "Terminated by admin");
+          return;
+        }
         await pool.query(
           "update fin_insider_sync_state set status = 'queued', current_label = $1, updated_at = now() where id = 'backfill'",
           [`Waiting for active sync (${attempt}/40)`],
@@ -69,6 +77,28 @@ export async function getInsiderTradeBackfillStatus() {
   return { ...row, progressPercent: row.totalMonths ? Math.round((row.completedMonths / row.totalMonths) * 10000) / 100 : 0 };
 }
 
+export async function cancelInsiderTradeBackfill() {
+  const result = await pool.query(
+    `update fin_insider_sync_state
+     set status = 'cancelling', current_label = 'Stopping after the current month', updated_at = now()
+     where id = 'backfill' and status in ('queued', 'running')
+     returning id`,
+  );
+  if (!result.rowCount) return { accepted: false, status: await getInsiderTradeBackfillStatus() };
+
+  const client = await pool.connect();
+  try {
+    const lock = await client.query("select pg_try_advisory_lock($1) as locked", [syncLockId]);
+    if (lock.rows[0]?.locked === true) {
+      await client.query("select pg_advisory_unlock($1)", [syncLockId]);
+      await markBackfillStopped("cancelled", "Terminated by admin");
+    }
+  } finally {
+    client.release();
+  }
+  return { accepted: true, status: await getInsiderTradeBackfillStatus() };
+}
+
 export async function backfillInsiderTrades({ fromYear = earliestBackfillYear, toYear = new Date().getUTCFullYear() } = {}) {
   const currentYear = new Date().getUTCFullYear();
   const firstYear = Math.max(earliestBackfillYear, Number(fromYear) || earliestBackfillYear);
@@ -79,14 +109,19 @@ export async function backfillInsiderTrades({ fromYear = earliestBackfillYear, t
       const year = firstYear + index;
       return monthWindows(year, year === currentYear ? isoToday() : `${year}-12-31`).length;
     }).reduce((total, count) => total + count, 0);
-    await client.query(
+    const started = await client.query(
       `update fin_insider_sync_state set status = 'running', current_label = 'Starting', from_year = $1, to_year = $2,
          total_windows = $3, completed_windows = 0, failed_windows = 0, progress_received = 0,
          progress_inserted = 0, progress_updated = 0, progress_ignored = 0, last_error = '',
          started_at = coalesce(started_at, now()), completed_at = null, updated_at = now()
-       where id = 'backfill'`,
+       where id = 'backfill' and status = 'queued'
+       returning id`,
       [firstYear, lastYear, totalWindows],
     );
+    if (!started.rowCount) {
+      await markBackfillStopped("cancelled", "Terminated by admin");
+      return { ok: false, cancelled: true, fromYear: firstYear, toYear: lastYear };
+    }
     const years = [];
     const failures = [];
     let received = 0;
@@ -99,6 +134,9 @@ export async function backfillInsiderTrades({ fromYear = earliestBackfillYear, t
       const yearResult = { year, received: 0, inserted: 0, updated: 0, ignored: 0, rejected: 0, failedWindows: 0 };
       const yearEnd = year === currentYear ? isoToday() : `${year}-12-31`;
       for (const window of monthWindows(year, yearEnd)) {
+        if (await isBackfillCancellationRequested(client)) {
+          return finishCancelledBackfill(client, { fromYear: firstYear, toYear: lastYear, completedWindows, failures, received: received + yearResult.received, inserted: inserted + yearResult.inserted, updated: updated + yearResult.updated, ignored: ignored + yearResult.ignored });
+        }
         const label = monthLabel(window.from);
         console.log(`[Insider backfill] Running ${label} (${window.from} to ${window.to})`);
         await updateBackfillProgress(client, { status: "running", currentLabel: `Running ${label}`, completed: completedWindows, failed: failures.length, received: received + yearResult.received, inserted: inserted + yearResult.inserted, updated: updated + yearResult.updated, ignored: ignored + yearResult.ignored });
@@ -116,6 +154,9 @@ export async function backfillInsiderTrades({ fromYear = earliestBackfillYear, t
           console.error(`[Insider backfill] Failed ${label}: ${error.message}`);
         }
         completedWindows += 1;
+        if (await isBackfillCancellationRequested(client)) {
+          return finishCancelledBackfill(client, { fromYear: firstYear, toYear: lastYear, completedWindows, failures, received: received + yearResult.received, inserted: inserted + yearResult.inserted, updated: updated + yearResult.updated, ignored: ignored + yearResult.ignored });
+        }
         await updateBackfillProgress(client, {
           status: "running",
           currentLabel: `Completed ${label}`,
@@ -141,6 +182,26 @@ export async function backfillInsiderTrades({ fromYear = earliestBackfillYear, t
     console.log(`[Insider backfill] Finished ${firstYear}-${lastYear}: ${received} received, ${inserted} inserted, ${updated} enriched, ${ignored} duplicates, ${failures.length} failed month(s)`);
     return summary;
   });
+}
+
+async function isBackfillCancellationRequested(client = pool) {
+  const result = await client.query("select status from fin_insider_sync_state where id = 'backfill'");
+  return result.rows[0]?.status === "cancelling";
+}
+
+async function finishCancelledBackfill(client, progress) {
+  await updateBackfillProgress(client, {
+    status: "cancelled",
+    currentLabel: "Terminated by admin",
+    completed: progress.completedWindows,
+    failed: progress.failures.length,
+    received: progress.received,
+    inserted: progress.inserted,
+    updated: progress.updated,
+    ignored: progress.ignored,
+    completedAt: true,
+  });
+  return { ok: false, cancelled: true, ...progress };
 }
 
 async function updateBackfillProgress(client, progress) {

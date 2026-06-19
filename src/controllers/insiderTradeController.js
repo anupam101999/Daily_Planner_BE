@@ -1,5 +1,5 @@
 import { pool } from "../config/database.js";
-import { getInsiderTradeBackfillStatus, getStoredInsiderTrades, queueInsiderTradeBackfill, syncRecentInsiderTrades } from "../services/insiderTradeService.js";
+import { cancelInsiderTradeBackfill, getInsiderTradeBackfillStatus, getStoredInsiderTrades, queueInsiderTradeBackfill, syncRecentInsiderTrades } from "../services/insiderTradeService.js";
 
 export async function getInsiderTradesFeature(request, response, next) {
   try {
@@ -60,6 +60,19 @@ export async function backfillInsiderTradesFeature(request, response, next) {
 export async function getBackfillStatusFeature(_request, response, next) {
   try {
     response.json(await getInsiderTradeBackfillStatus());
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function cancelBackfillFeature(_request, response, next) {
+  try {
+    const result = await cancelInsiderTradeBackfill();
+    if (!result.accepted) {
+      response.status(409).json({ error: "No insider backfill is currently running", code: "INSIDER_BACKFILL_NOT_RUNNING", ...result });
+      return;
+    }
+    response.status(202).json(result);
   } catch (error) {
     next(error);
   }
