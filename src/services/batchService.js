@@ -1,7 +1,6 @@
 import { refreshAllFinanceQuotesForAllUsers } from "../controllers/financeController.js";
 import { pool } from "../config/database.js";
 import { rolloverIncompleteTasks } from "./taskRolloverService.js";
-import { syncRecentInsiderTrades } from "./insiderTradeService.js";
 
 const state = new Map();
 const batches = {
@@ -18,13 +17,6 @@ const batches = {
     defaultCron: "0 16 * * *",
     defaultEnabled: () => process.env.FIN_QUOTE_SYNC_ENABLED !== "false",
     run: refreshAllFinanceQuotesForAllUsers,
-  },
-  "insider-trades": {
-    name: "Recent insider trade sync",
-    description: "Import the latest NSE and BSE insider disclosures.",
-    defaultCron: process.env.FIN_INSIDER_SYNC_CRON || "15 */6 * * *",
-    defaultEnabled: () => process.env.FIN_INSIDER_SYNC_ENABLED !== "false",
-    run: syncRecentInsiderTrades,
   },
 };
 

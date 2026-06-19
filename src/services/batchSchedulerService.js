@@ -8,7 +8,7 @@ export async function startBatchSchedulers() {
   const schedules = await getBatchSchedules();
   for (const id of schedules.keys()) await rescheduleBatch(id, schedules);
 
-  for (const id of ["task-rollover", "insider-trades"]) {
+  for (const id of ["task-rollover"]) {
     if (schedules.get(id)?.enabled) void executeScheduledBatch(id);
   }
 }

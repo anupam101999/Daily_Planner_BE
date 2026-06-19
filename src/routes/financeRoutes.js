@@ -15,8 +15,6 @@ import {
   updateHolding,
   updateTransaction,
 } from "../controllers/financeController.js";
-import { backfillInsiderTradesFeature, cancelBackfillFeature, getBackfillStatusFeature, getInsiderTradesFeature, syncInsiderTradesFeature } from "../controllers/insiderTradeController.js";
-import { requireAdmin } from "../middleware/requireAdmin.js";
 
 const router = Router();
 
@@ -26,18 +24,6 @@ router.get("/assets/held", getHeldStockOptions);
 router.get("/holdings", getHoldingsFeature);
 router.get("/profit", getProfitFeature);
 router.get("/ledger", getLedgerFeature);
-router.get("/insider-trades", getInsiderTradesFeature);
-router.post("/insider-trades/sync", requireAdmin, syncInsiderTradesFeature);
-router.post("/insider-trades/sync-last-7-days", requireAdmin, syncInsiderTradesFeature);
-router.post("/insider-trades/backfill", requireAdmin, backfillInsiderTradesFeature);
-router.delete("/insider-trades/backfill", requireAdmin, cancelBackfillFeature);
-router.get("/insider-trades/backfill/status", requireAdmin, getBackfillStatusFeature);
-
-// Keep historical automation compatible with the former market-intelligence URLs.
-router.post("/market-intelligence/insider-trades/backfill", requireAdmin, backfillInsiderTradesFeature);
-router.delete("/market-intelligence/insider-trades/backfill", requireAdmin, cancelBackfillFeature);
-router.get("/market-intelligence/insider-trades/backfill/status", requireAdmin, getBackfillStatusFeature);
-
 router.post("/sync", syncFinanceQuotes);
 router.post("/holdings", createHolding);
 router.patch("/holdings/:id", updateHolding);
