@@ -1,10 +1,12 @@
 import cors from "cors";
 import express from "express";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { requestContext } from "./middleware/requestContext.js";
 import apiRoutes from "./routes/index.js";
 
 const app = express();
 
+app.use(requestContext);
 app.use(cors());
 app.use(express.json());
 
@@ -32,6 +34,8 @@ app.use((_request, response) => {
   response.status(404).json({
     ok: false,
     error: "Route not found",
+    code: "ROUTE_NOT_FOUND",
+    requestId: _request.requestId,
     health: "/api/health",
   });
 });

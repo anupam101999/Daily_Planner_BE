@@ -1121,15 +1121,15 @@ function badRequest(message) {
 
 function handleFinanceError(error, response, next) {
   if (error.status) {
-    response.status(error.status).json({ error: error.message });
+    response.status(error.status).json({ error: error.message, code: error.code || "FINANCE_VALIDATION_ERROR", requestId: response.req?.requestId || "" });
     return;
   }
   if (error.code === "23505") {
-    response.status(409).json({ error: "An investment with this symbol and exchange already exists" });
+    response.status(409).json({ error: "An investment with this symbol and exchange already exists", code: "FINANCE_ASSET_CONFLICT", requestId: response.req?.requestId || "" });
     return;
   }
   if (error.code === "23514" || error.code === "22003") {
-    response.status(400).json({ error: "The transaction contains an invalid or unsupported numeric value" });
+    response.status(400).json({ error: "The transaction contains an invalid or unsupported numeric value", code: "FINANCE_VALUE_INVALID", requestId: response.req?.requestId || "" });
     return;
   }
   next(error);
