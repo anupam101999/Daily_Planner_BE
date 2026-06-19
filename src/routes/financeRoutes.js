@@ -32,6 +32,10 @@ router.post("/insider-trades/sync-last-7-days", requireAdmin, syncInsiderTradesF
 router.post("/insider-trades/backfill", requireAdmin, backfillInsiderTradesFeature);
 router.get("/insider-trades/backfill/status", requireAdmin, getBackfillStatusFeature);
 
+// Keep historical automation compatible with the former market-intelligence URLs.
+router.post("/market-intelligence/insider-trades/backfill", requireAdmin, backfillInsiderTradesFeature);
+router.get("/market-intelligence/insider-trades/backfill/status", requireAdmin, getBackfillStatusFeature);
+
 router.post("/sync", syncFinanceQuotes);
 router.post("/holdings", createHolding);
 router.patch("/holdings/:id", updateHolding);

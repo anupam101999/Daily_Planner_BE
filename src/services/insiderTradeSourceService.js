@@ -11,6 +11,9 @@ const browserHeaders = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
 };
 const bseHeaders = { ...browserHeaders, Referer: "https://www.bseindia.com/" };
+let nseCookie = "";
+let nseCookieStoredAt = 0;
+const nseCookieMs = 15 * 60 * 1000;
 
 export async function fetchIndianInsiderTradeFilings({ fromDate, toDate }) {
   const from = validDate(fromDate);
@@ -19,20 +22,36 @@ export async function fetchIndianInsiderTradeFilings({ fromDate, toDate }) {
   if (to > new Date().toISOString().slice(0, 10)) throw new Error("Insider filing range cannot end in the future");
 
   const ranges = splitDateRange(from, to, 31);
-  const [nsePayloads, bsePayloads] = await Promise.all([
+  const [nseResult, bseResult] = await Promise.allSettled([
     fetchWindows(ranges, ({ from: start, to: end }) => {
       const params = new URLSearchParams({ index: "equities", from_date: exchangeDate(start, "-"), to_date: exchangeDate(end, "-") });
-      return cachedJson(`nse:insiders:filings:${start}:${end}`, `${nseBaseUrl}/corporates-pit?${params}`);
+      return cachedJson(`nse:insiders:filings:${start}:${end}`, `${nseBaseUrl}/corporates-pit?${params}`, { nse: true });
     }),
     fetchWindows(ranges, ({ from: start, to: end }) => {
       const params = new URLSearchParams({ fromdt: exchangeDate(start, "/"), todt: exchangeDate(end, "/"), pageno: "1", scripcode: "" });
       return cachedJson(`bse:insiders:filings:${start}:${end}`, `${bseBaseUrl}/InsiderTrade15/w?${params}`, { headers: bseHeaders });
     }),
   ]);
+  if (nseResult.status === "rejected" && bseResult.status === "rejected") {
+    throw new Error(`NSE and BSE insider sources failed. NSE: ${nseResult.reason.message}. BSE: ${bseResult.reason.message}`);
+  }
+  const nsePayloads = nseResult.status === "fulfilled" ? nseResult.value : [];
+  const bsePayloads = bseResult.status === "fulfilled" ? bseResult.value : [];
   const nseRows = nsePayloads.flatMap((payload) => payload.data || []).map(normalizeNseTrade);
   const bseRows = bsePayloads.flatMap((payload) => payload.Table || []).map(normalizeBseTrade);
   const rows = [...nseRows, ...bseRows].filter((row) => isValidActivityDate(row));
-  return { rows, received: rows.length, rejected: nseRows.length + bseRows.length - rows.length, sources: { nse: nseRows.length, bse: bseRows.length }, fromDate: from, toDate: to };
+  return {
+    rows,
+    received: rows.length,
+    rejected: nseRows.length + bseRows.length - rows.length,
+    sources: { nse: nseRows.length, bse: bseRows.length },
+    sourceErrors: {
+      nse: nseResult.status === "rejected" ? nseResult.reason.message : "",
+      bse: bseResult.status === "rejected" ? bseResult.reason.message : "",
+    },
+    fromDate: from,
+    toDate: to,
+  };
 }
 
 async function fetchWindows(ranges, fetchWindow) {
@@ -59,20 +78,66 @@ async function cachedJson(key, url, options = {}) {
   if (cached && Date.now() - cached.storedAt < cacheMs) return cached.data;
   if (inFlight.has(key)) return inFlight.get(key);
   const request = (async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-    try {
-      const response = await fetch(url, { headers: browserHeaders, ...options, signal: controller.signal });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      cache.set(key, { data, storedAt: Date.now() });
-      return data;
-    } finally {
-      clearTimeout(timer);
-    }
+    const data = options.nse
+      ? await fetchNseJson(url)
+      : await fetchJson(url, options);
+    cache.set(key, { data, storedAt: Date.now() });
+    return data;
   })();
   inFlight.set(key, request);
   try { return await request; } finally { inFlight.delete(key); }
+}
+
+async function fetchNseJson(url) {
+  await refreshNseCookie(false);
+  let response = await fetchWithTimeout(url, { headers: nseHeaders() });
+  if (response.status === 401 || response.status === 403) {
+    await refreshNseCookie(true);
+    response = await fetchWithTimeout(url, { headers: nseHeaders() });
+  }
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+async function refreshNseCookie(force) {
+  if (!force && nseCookie && Date.now() - nseCookieStoredAt < nseCookieMs) return;
+  const response = await fetchWithTimeout("https://www.nseindia.com/", {
+    headers: { ...browserHeaders, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+  });
+  if (!response.ok) throw new Error(`NSE session bootstrap failed with HTTP ${response.status}`);
+  nseCookie = readCookies(response.headers);
+  nseCookieStoredAt = Date.now();
+}
+
+function nseHeaders() {
+  return {
+    ...browserHeaders,
+    ...(nseCookie ? { Cookie: nseCookie } : {}),
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+  };
+}
+
+function readCookies(headers) {
+  const values = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [headers.get("set-cookie") || ""];
+  return values.flatMap((value) => value.split(/,(?=\s*[^;,=]+=[^;,]+)/)).map((value) => value.split(";", 1)[0].trim()).filter(Boolean).join("; ");
+}
+
+async function fetchJson(url, options) {
+  const response = await fetchWithTimeout(url, { ...options, headers: options.headers || browserHeaders });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function normalizeNseTrade(row) {

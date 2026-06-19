@@ -259,7 +259,7 @@ async function syncRange(client, fromDate, toDate, stateId) {
        last_seen = excluded.last_seen, last_error = '', updated_at = now()`,
     [stateId, fromDate, toDate, inserted, fetched.rows.length],
   );
-  return { ok: true, fromDate, toDate, received: fetched.rows.length, inserted, updated, ignored, rejected: fetched.rejected, sources: fetched.sources };
+  return { ok: true, fromDate, toDate, received: fetched.rows.length, inserted, updated, ignored, rejected: fetched.rejected, sources: fetched.sources, sourceErrors: fetched.sourceErrors };
 }
 
 async function insertChunk(client, rows) {

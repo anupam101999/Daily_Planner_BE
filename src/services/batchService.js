@@ -38,6 +38,7 @@ export function getBatches() {
     lastStartedAt: state.get(id)?.lastStartedAt || null,
     lastCompletedAt: state.get(id)?.lastCompletedAt || null,
     lastError: state.get(id)?.lastError || "",
+    lastWarning: state.get(id)?.lastWarning || "",
   }));
 }
 
@@ -47,13 +48,14 @@ export async function runBatch(id) {
   if (state.get(id)?.running) return { found: true, accepted: false };
 
   const startedAt = new Date().toISOString();
-  state.set(id, { ...state.get(id), running: true, lastStartedAt: startedAt, lastError: "" });
+  state.set(id, { ...state.get(id), running: true, lastStartedAt: startedAt, lastError: "", lastWarning: "" });
   try {
     const result = await batch.run();
-    state.set(id, { running: false, lastStartedAt: startedAt, lastCompletedAt: new Date().toISOString(), lastError: "" });
+    const lastWarning = Object.entries(result?.sourceErrors || {}).filter(([, message]) => message).map(([source, message]) => `${source.toUpperCase()}: ${message}`).join("; ");
+    state.set(id, { running: false, lastStartedAt: startedAt, lastCompletedAt: new Date().toISOString(), lastError: "", lastWarning });
     return { found: true, accepted: true, result };
   } catch (error) {
-    state.set(id, { running: false, lastStartedAt: startedAt, lastCompletedAt: new Date().toISOString(), lastError: error.message });
+    state.set(id, { running: false, lastStartedAt: startedAt, lastCompletedAt: new Date().toISOString(), lastError: error.message, lastWarning: "" });
     throw error;
   }
 }
