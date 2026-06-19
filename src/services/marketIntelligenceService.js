@@ -832,6 +832,11 @@ function normalizeAction(row) {
 }
 
 function normalizeInsiderTrade(row) {
+  const holdingBeforePercent = nullableNumber(row.befAcqSharesPer);
+  const holdingAfterPercent = nullableNumber(row.afterAcqSharesPer);
+  const quantity = Math.abs(number(
+    row.secAcq || row.buyQuantity || row.sellquantity || row.quantity || row.noOfSecurities,
+  ));
   return {
     id: String(
       row.id ||
@@ -847,23 +852,29 @@ function normalizeInsiderTrade(row) {
       row.tdpTransactionType || row.transactionType || row.mode,
     ),
     acquisitionMode: cleanText(row.acqMode),
-    quantity: Math.abs(number(
-      row.secAcq ||
-        row.buyQuantity ||
-        row.sellquantity ||
-        row.quantity ||
-        row.noOfSecurities,
-    )),
+    quantity,
     value: Math.abs(number(row.secVal || row.value)),
     date: cleanText(row.acqfromDt || row.transactionDate || row.date),
     disclosureDate: cleanText(row.date || row.intimDt),
     disclosureUrl: safeUrl(row.xbrl),
+    holdingBeforePercent,
+    holdingAfterPercent,
+    marketCapImpactPercent: calculateMarketCapImpact({
+      quantity,
+      beforeShares: number(row.befAcqSharesNo),
+      beforePercent: holdingBeforePercent,
+      afterShares: number(row.afterAcqSharesNo),
+      afterPercent: holdingAfterPercent,
+    }),
     source: "NSE",
   };
 }
 
 function normalizeBseInsiderTrade(row) {
   const code = String(row.Fld_ScripCode || "").trim();
+  const holdingBeforePercent = nullableNumber(row.Fld_PercentofShareholdingPre);
+  const holdingAfterPercent = nullableNumber(row.Fld_PercentofShareholdingPost);
+  const quantity = Math.abs(number(row.Fld_SecurityNo));
   return {
     id: `bse-${row.Fld_ID || `${code}-${row.Fld_CreateDate}`}`,
     sourceRecordId: String(row.Fld_ID || ""),
@@ -873,7 +884,7 @@ function normalizeBseInsiderTrade(row) {
     category: cleanText(row.Fld_PersonCatgName),
     transactionType: normalizeTradeType(row.Fld_TransactionType),
     acquisitionMode: cleanText(row.ModeOfAquisation),
-    quantity: Math.abs(number(row.Fld_SecurityNo)),
+    quantity,
     value: Math.abs(number(row.Fld_SecurityValue)),
     date: formatBseInsiderDate(row.Fld_FromDate || row.Fld_LetterDate),
     disclosureDate: formatBseInsiderDate(
@@ -882,8 +893,27 @@ function normalizeBseInsiderTrade(row) {
     disclosureUrl: safeUrl(
       row.xbrlurl ? `https://www.bseindia.com${row.xbrlurl}` : "",
     ),
+    holdingBeforePercent,
+    holdingAfterPercent,
+    marketCapImpactPercent: calculateMarketCapImpact({
+      quantity,
+      beforeShares: number(row.Fld_SecurityNoPrior),
+      beforePercent: holdingBeforePercent,
+      afterShares: number(row.Fld_SecurityNoPost),
+      afterPercent: holdingAfterPercent,
+    }),
     source: "BSE",
   };
+}
+
+function calculateMarketCapImpact({ quantity, beforeShares, beforePercent, afterShares, afterPercent }) {
+  const candidates = [
+    beforeShares > 0 && beforePercent > 0 ? beforeShares / (beforePercent / 100) : 0,
+    afterShares > 0 && afterPercent > 0 ? afterShares / (afterPercent / 100) : 0,
+  ].filter((value) => Number.isFinite(value) && value > 0);
+  if (quantity > 0 && candidates.length) return (quantity / candidates[0]) * 100;
+  if (beforePercent != null && afterPercent != null) return Math.abs(afterPercent - beforePercent);
+  return null;
 }
 
 function normalizeTradeType(value) {
@@ -1048,6 +1078,12 @@ function number(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function nullableNumber(value) {
+  if (value == null || String(value).trim() === "" || /^nil$/i.test(String(value).trim())) return null;
+  const parsed = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function parseNseDate(value) {
   const match = String(value || "").match(/^(\d{1,2})-([A-Z]{3})-(\d{4})$/i);
   if (!match) return 0;
@@ -1173,4 +1209,5 @@ export const marketIntelligenceTestUtils = {
   matchesInsiderSearch,
   matchesInsiderSearchExact,
   matchesInsiderPrimarySearch,
+  calculateMarketCapImpact,
 };

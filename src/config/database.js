@@ -211,6 +211,9 @@ export async function initDatabase() {
       activity_date date not null,
       disclosure_date date,
       disclosure_url text not null default '',
+      holding_before_percent numeric(12, 6),
+      holding_after_percent numeric(12, 6),
+      market_cap_impact_percent numeric(14, 8),
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       constraint fin_insider_trade_company_required check (length(trim(company)) > 0),
@@ -234,6 +237,12 @@ export async function initDatabase() {
     create index if not exists fin_insider_trade_company_idx
       on fin_insider_trade (lower(company), activity_date desc);
 
+    create index if not exists fin_insider_trade_type_activity_idx
+      on fin_insider_trade (transaction_type, activity_date desc, id desc);
+
+    create index if not exists fin_insider_trade_source_disclosure_idx
+      on fin_insider_trade (source, disclosure_date desc, id desc);
+
     create table if not exists fin_insider_sync_state (
       id text primary key,
       last_from_date date,
@@ -242,8 +251,42 @@ export async function initDatabase() {
       last_inserted integer not null default 0,
       last_seen integer not null default 0,
       last_error text not null default '',
+      status text not null default 'idle',
+      current_label text not null default '',
+      from_year integer,
+      to_year integer,
+      total_windows integer not null default 0,
+      completed_windows integer not null default 0,
+      failed_windows integer not null default 0,
+      progress_received integer not null default 0,
+      progress_inserted integer not null default 0,
+      progress_updated integer not null default 0,
+      progress_ignored integer not null default 0,
+      started_at timestamptz,
+      completed_at timestamptz,
       updated_at timestamptz not null default now()
     );
+
+    alter table fin_insider_sync_state add column if not exists status text not null default 'idle';
+    alter table fin_insider_sync_state add column if not exists current_label text not null default '';
+    alter table fin_insider_sync_state add column if not exists from_year integer;
+    alter table fin_insider_sync_state add column if not exists to_year integer;
+    alter table fin_insider_sync_state add column if not exists total_windows integer not null default 0;
+    alter table fin_insider_sync_state add column if not exists completed_windows integer not null default 0;
+    alter table fin_insider_sync_state add column if not exists failed_windows integer not null default 0;
+    alter table fin_insider_sync_state add column if not exists progress_received integer not null default 0;
+    alter table fin_insider_sync_state add column if not exists progress_inserted integer not null default 0;
+    alter table fin_insider_sync_state add column if not exists progress_updated integer not null default 0;
+    alter table fin_insider_sync_state add column if not exists progress_ignored integer not null default 0;
+    alter table fin_insider_sync_state add column if not exists started_at timestamptz;
+    alter table fin_insider_sync_state add column if not exists completed_at timestamptz;
+
+    create index if not exists fin_insider_sync_state_status_idx
+      on fin_insider_sync_state (status, updated_at desc);
+
+    alter table fin_insider_trade add column if not exists holding_before_percent numeric(12, 6);
+    alter table fin_insider_trade add column if not exists holding_after_percent numeric(12, 6);
+    alter table fin_insider_trade add column if not exists market_cap_impact_percent numeric(14, 8);
   `);
 
   if (hasTrigram) {
@@ -256,6 +299,16 @@ export async function initDatabase() {
 
       create index if not exists fin_asset_sector_trgm_idx
         on fin_asset using gin (lower(sector) gin_trgm_ops);
+
+      create index if not exists fin_insider_trade_identity_search_trgm_idx
+        on fin_insider_trade using gin (
+          lower(symbol || ' ' || company) gin_trgm_ops
+        );
+
+      create index if not exists fin_insider_trade_full_search_trgm_idx
+        on fin_insider_trade using gin (
+          lower(symbol || ' ' || company || ' ' || person || ' ' || category || ' ' || transaction_type || ' ' || acquisition_mode) gin_trgm_ops
+        );
     `);
   }
 }

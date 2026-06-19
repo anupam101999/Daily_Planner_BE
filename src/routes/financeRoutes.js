@@ -15,7 +15,7 @@ import {
   updateHolding,
   updateTransaction,
 } from "../controllers/financeController.js";
-import { backfillInsiderTradesFeature, getInsiderTradesFeature, getMarketIntelligenceFeature, syncInsiderTradesFeature } from "../controllers/marketIntelligenceController.js";
+import { backfillInsiderTradesFeature, getBackfillStatusFeature, getInsiderTradesFeature, getMarketIntelligenceFeature, syncInsiderTradesFeature } from "../controllers/marketIntelligenceController.js";
 import { requireAdmin } from "../middleware/requireAdmin.js";
 
 const router = Router();
@@ -31,6 +31,7 @@ router.get("/market-intelligence/insider-trades", getInsiderTradesFeature);
 router.post("/market-intelligence/insider-trades/sync", requireAdmin, syncInsiderTradesFeature);
 router.post("/market-intelligence/insider-trades/sync-last-7-days", requireAdmin, syncInsiderTradesFeature);
 router.post("/market-intelligence/insider-trades/backfill", requireAdmin, backfillInsiderTradesFeature);
+router.get("/market-intelligence/insider-trades/backfill/status", requireAdmin, getBackfillStatusFeature);
 
 router.post("/sync", syncFinanceQuotes);
 router.post("/holdings", createHolding);

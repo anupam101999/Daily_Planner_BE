@@ -38,6 +38,11 @@ test("future activity dates and activity after disclosure are rejected", () => {
   assert.equal(utils.hasInvalidInsiderActivityDate({ date: "09-Mar-2026", disclosureDate: "12-Mar-2026 16:27" }), false);
 });
 
+test("promoter transaction impact uses disclosed outstanding share base", () => {
+  assert.equal(utils.calculateMarketCapImpact({ quantity: 100000, beforeShares: 1000000, beforePercent: 10, afterShares: 1100000, afterPercent: 11 }), 1);
+  assert.equal(utils.calculateMarketCapImpact({ quantity: 100000, beforeShares: 1000000, beforePercent: 10, afterShares: 1000000, afterPercent: 10 }), 1);
+});
+
 test("insider search tolerates common company-name spelling mistakes", () => {
   const row = { symbol: "SENORES", company: "Senores Pharmaceuticals Limited", person: "A Promoter", category: "Promoter", transactionType: "Buy", acquisitionMode: "Market Purchase" };
   assert.equal(utils.matchesInsiderSearch(row, "senorous pharam"), true);

@@ -1,6 +1,6 @@
 import { pool } from "../config/database.js";
 import { clearMarketIntelligenceCache, getMarketIntelligence } from "../services/marketIntelligenceService.js";
-import { backfillInsiderTrades, getStoredInsiderTrades, syncRecentInsiderTrades } from "../services/insiderTradeService.js";
+import { getInsiderTradeBackfillStatus, getStoredInsiderTrades, queueInsiderTradeBackfill, syncRecentInsiderTrades } from "../services/insiderTradeService.js";
 
 export async function getMarketIntelligenceFeature(request, response, next) {
   try {
@@ -16,7 +16,7 @@ export async function getMarketIntelligenceFeature(request, response, next) {
       getStoredInsiderTrades({ year: currentYear, symbols: result.rows.map((row) => row.symbol), companyNames: result.rows.map((row) => row.name), page: 1, pageSize: 50 }),
     ]);
     intelligence.insiderTrades = { market: marketInsiders.rows, portfolio: portfolioInsiders.rows };
-    intelligence.sources.insiderTradesDatabase = { ok: true, total: marketInsiders.total };
+    intelligence.sources.insiderTradesDatabase = { ok: true, available: true, total: marketInsiders.total };
     response.json(intelligence);
   } catch (error) {
     next(error);
@@ -68,7 +68,20 @@ export async function backfillInsiderTradesFeature(request, response, next) {
       });
       return;
     }
-    response.json(await backfillInsiderTrades({ fromYear, toYear }));
+    const result = await queueInsiderTradeBackfill({ fromYear, toYear });
+    if (!result.accepted) {
+      response.status(409).json({ error: "An insider backfill is already running", code: "INSIDER_BACKFILL_ALREADY_RUNNING", ...result });
+      return;
+    }
+    response.status(202).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getBackfillStatusFeature(_request, response, next) {
+  try {
+    response.json(await getInsiderTradeBackfillStatus());
   } catch (error) {
     next(error);
   }

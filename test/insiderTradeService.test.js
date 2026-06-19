@@ -18,3 +18,11 @@ test("exchange dates convert to database ISO dates", () => {
   assert.equal(utils.exchangeDate("2026-03-09"), "2026-03-09");
   assert.equal(utils.exchangeDate("invalid"), "");
 });
+
+test("historical backfill uses calendar month windows", () => {
+  assert.deepEqual(utils.monthWindows(2026, "2026-03-18"), [
+    { from: "2026-01-01", to: "2026-01-31" },
+    { from: "2026-02-01", to: "2026-02-28" },
+    { from: "2026-03-01", to: "2026-03-18" },
+  ]);
+});
