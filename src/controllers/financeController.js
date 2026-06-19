@@ -33,6 +33,8 @@ export async function getFinanceOverview(request, response, next) {
     const portfolio = await loadPortfolio(request.dailyUserId);
     const holdings = buildHoldings(portfolio.assets, portfolio.transactions);
     const analytics = buildAnalytics(holdings, portfolio.transactions);
+    const fiscalYearStart = currentFiscalYearStart();
+    const fiscalYear = buildPeriodPerformance(holdings, portfolio.transactions, new Map(), fiscalYearStart, today());
     response.json({
       currentValue: analytics.currentValue,
       investedValue: analytics.investedValue,
@@ -40,6 +42,9 @@ export async function getFinanceOverview(request, response, next) {
       profitPercent: analytics.profitPercent,
       realizedProfit: analytics.realizedProfit,
       unrealizedProfit: analytics.unrealizedProfit,
+      thisFyProfit: fiscalYear.profit,
+      thisFyReturn: fiscalYear.returnPercent,
+      fiscalYearStart,
       holdingCount: analytics.holdingCount,
       soldCount: analytics.soldCount,
       refreshedAt: new Date().toISOString(),
@@ -153,6 +158,8 @@ export async function getAnalyticsFeature(request, response, next) {
         profitPercent: portfolioReturnPercent,
         allTimeProfitPercent: analytics.profitPercent,
         periodProfit: periodPerformance.profit,
+        periodRealizedProfit: periodPerformance.realizedProfit,
+        periodUnrealizedProfit: periodPerformance.unrealizedProfit,
         periodStartValue: periodPerformance.startValue,
         periodBuyValue: periodPerformance.buyValue,
         periodSellValue: periodPerformance.sellValue,
@@ -806,7 +813,7 @@ function buildAnalytics(holdings, transactions) {
   };
 }
 
-function buildPeriodPerformance(holdings, transactions, startPrices, startDate, endDate = today()) {
+export function buildPeriodPerformance(holdings, transactions, startPrices, startDate, endDate = today()) {
   const holdingMap = new Map(holdings.map((holding) => [holding.id, holding]));
   const rowsByAsset = transactions.reduce((map, row) => {
     const rows = map.get(row.assetId) || [];
@@ -820,6 +827,8 @@ function buildPeriodPerformance(holdings, transactions, startPrices, startDate, 
   let sellValue = 0;
   let dividendValue = 0;
   let feeValue = 0;
+  let realizedProfit = 0;
+  let realizedCost = 0;
 
   holdings.forEach((holding) => {
     const assetRows = rowsByAsset.get(holding.id) || [];
@@ -845,8 +854,22 @@ function buildPeriodPerformance(holdings, transactions, startPrices, startDate, 
     if (row.transactionType === "fee") feeValue += inr(row.charges || row.price);
   });
 
-  const profit = inr(endValue + sellValue + dividendValue - feeValue - buyValue - startValue);
-  const capitalBase = startValue + buyValue;
+  holdings.forEach((holding) => {
+    holding.closedTrades
+      .filter((trade) => trade.sellDate >= startDate && trade.sellDate <= endDate)
+      .forEach((trade) => {
+        realizedProfit += inr(trade.realizedProfit);
+        realizedCost += inr(trade.soldCost);
+      });
+  });
+
+  const openHoldings = holdings.filter((holding) => Number(holding.quantity || 0) > 0);
+  const unrealizedProfit = inr(sum(openHoldings, "profitLoss"));
+  const unrealizedCost = inr(sum(openHoldings, "investedValue"));
+  realizedProfit = inr(realizedProfit);
+  realizedCost = inr(realizedCost);
+  const profit = inr(realizedProfit + unrealizedProfit + dividendValue - feeValue);
+  const capitalBase = inr(realizedCost + unrealizedCost);
   return {
     startValue,
     endValue,
@@ -854,6 +877,10 @@ function buildPeriodPerformance(holdings, transactions, startPrices, startDate, 
     sellValue,
     dividendValue,
     feeValue,
+    realizedProfit,
+    unrealizedProfit,
+    realizedCost,
+    unrealizedCost,
     profit,
     returnPercent: capitalBase > 0 ? (profit / capitalBase) * 100 : null,
   };
@@ -1083,6 +1110,12 @@ function compareText(left, right) {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function currentFiscalYearStart() {
+  const now = new Date();
+  const year = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+  return `${year}-04-01`;
 }
 
 function validDate(value) {
