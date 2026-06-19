@@ -84,7 +84,7 @@ export async function cancelInsiderTradeBackfill() {
   const result = await pool.query(
     `update fin_insider_sync_state
      set status = 'cancelling', current_label = 'Stopping after the current month', updated_at = now()
-     where id = 'backfill' and status in ('queued', 'running')
+     where id = 'backfill' and status in ('queued', 'running', 'cancelling')
      returning id`,
   );
   if (!result.rowCount) return { accepted: false, status: await getInsiderTradeBackfillStatus() };
