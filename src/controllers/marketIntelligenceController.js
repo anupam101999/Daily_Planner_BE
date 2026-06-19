@@ -41,8 +41,16 @@ export async function getInsiderTradesFeature(request, response, next) {
   }
 }
 
-export async function syncInsiderTradesFeature(_request, response, next) {
+export async function syncInsiderTradesFeature(request, response, next) {
   try {
+    if (request.body?.fromYear != null || request.body?.toYear != null) {
+      response.status(400).json({
+        error: "Historical year ranges must use the insider-trades/backfill endpoint",
+        code: "INSIDER_BACKFILL_ENDPOINT_REQUIRED",
+        endpoint: "/api/finance/market-intelligence/insider-trades/backfill",
+      });
+      return;
+    }
     response.json(await syncRecentInsiderTrades());
   } catch (error) {
     next(error);
@@ -51,7 +59,16 @@ export async function syncInsiderTradesFeature(_request, response, next) {
 
 export async function backfillInsiderTradesFeature(request, response, next) {
   try {
-    response.json(await backfillInsiderTrades({ fromYear: request.body?.fromYear, toYear: request.body?.toYear }));
+    const fromYear = Number(request.body?.fromYear ?? 2015);
+    const toYear = Number(request.body?.toYear ?? new Date().getUTCFullYear());
+    if (!Number.isInteger(fromYear) || !Number.isInteger(toYear) || fromYear < 2015 || toYear < fromYear) {
+      response.status(400).json({
+        error: "fromYear and toYear must be valid years, with toYear greater than or equal to fromYear",
+        code: "INVALID_INSIDER_BACKFILL_RANGE",
+      });
+      return;
+    }
+    response.json(await backfillInsiderTrades({ fromYear, toYear }));
   } catch (error) {
     next(error);
   }
