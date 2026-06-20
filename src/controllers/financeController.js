@@ -1,5 +1,6 @@
 import { pool } from "../config/database.js";
 import { getGoogleFinanceQuotes, getNiftyBenchmark } from "../services/googleFinanceService.js";
+import { appLog } from "../services/appLogService.js";
 import { buildClosedTrades, buildPosition, validateTransactionSequence } from "../services/financePositionService.js";
 
 const assetColumns = `
@@ -457,10 +458,19 @@ export async function refreshAllFinanceQuotesForUser(userId) {
   const quotes = await refreshAssetQuotes(userId, assets);
   const updated = quotes.filter((quote) => quote?.price).length;
   const failed = quotes.length - updated;
+  const failures = quotes.map((quote, index) => quote?.price ? null : ({
+    assetId: assets[index]?.id,
+    name: assets[index]?.stockName,
+    symbol: assets[index]?.symbol,
+    exchange: assets[index]?.exchange,
+    error: quote?.error || "Quote unavailable",
+  })).filter(Boolean);
+  if (failures.length) appLog.warn("finance.quote_sync_partial", { userId, message: `${failures.length} market quote(s) failed`, failures });
   return {
     ok: true,
     updated,
     failed,
+    failures,
     checked: quotes.length,
     skipped: allAssets.length - assets.length,
     syncedAt: new Date().toISOString(),
@@ -471,7 +481,8 @@ export async function refreshAllFinanceQuotesForAllUsers() {
   const userResult = await pool.query("select distinct user_id::text as id from fin_asset order by user_id");
   const results = [];
   for (const row of userResult.rows) {
-    results.push(await refreshAllFinanceQuotesForUser(row.id));
+    const result = await refreshAllFinanceQuotesForUser(row.id);
+    results.push({ ...result, userId: row.id });
   }
   return {
     users: results.length,
@@ -479,6 +490,7 @@ export async function refreshAllFinanceQuotesForAllUsers() {
     failed: results.reduce((total, item) => total + item.failed, 0),
     checked: results.reduce((total, item) => total + item.checked, 0),
     skipped: results.reduce((total, item) => total + item.skipped, 0),
+    failures: results.flatMap((item) => item.failures.map((failure) => ({ ...failure, userId: item.userId }))),
     syncedAt: new Date().toISOString(),
   };
 }
@@ -606,7 +618,7 @@ export async function deleteTransaction(request, response, next) {
   }
 }
 
-async function loadPortfolio(userId, options = {}) {
+export async function loadPortfolio(userId, options = {}) {
   const [assetResult, transactionResult] = await Promise.all([
     pool.query(`select ${assetColumns} from fin_asset where user_id = $1 order by updated_at desc`, [userId]),
     pool.query(`select ${transactionColumns} from fin_transaction where user_id = $1 order by transaction_date asc, created_at asc`, [userId]),
@@ -712,7 +724,7 @@ async function persistAssetQuote(userId, assetId, quote) {
   );
 }
 
-function buildHoldings(assets, transactions) {
+export function buildHoldings(assets, transactions) {
   return assets.map((asset) => buildPosition(asset, transactions)).sort((left, right) => right.currentValue - left.currentValue);
 }
 
@@ -744,7 +756,7 @@ function holdingReturnPercent(holding) {
   return soldCost ? (Number(holding.realizedProfit || 0) / soldCost) * 100 : 0;
 }
 
-function buildAnalytics(holdings, transactions) {
+export function buildAnalytics(holdings, transactions) {
   const openHoldings = holdings.filter((holding) => holding.quantity > 0);
   const investedValue = sum(openHoldings, "investedValue");
   const currentValue = sum(openHoldings, "currentValue");

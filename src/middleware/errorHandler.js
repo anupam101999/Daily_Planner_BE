@@ -1,6 +1,10 @@
+import { appLog } from "../services/appLogService.js";
+
 export function errorHandler(error, request, response, _next) {
   const requestId = request.requestId || "unknown";
   console.error({ requestId, method: request.method, path: request.originalUrl, code: error?.code, message: error?.message, stack: error?.stack });
+  appLog.error("api.exception", { requestId, userId: request.dailyUserId, method: request.method, path: request.originalUrl,
+    statusCode: Number(error?.status || 500), code: error?.code, message: error?.message, errorName: error?.name });
 
   if (error?.type === "entity.parse.failed") {
     response.status(400).json({ error: "Request body must contain valid JSON", code: "INVALID_JSON", requestId });

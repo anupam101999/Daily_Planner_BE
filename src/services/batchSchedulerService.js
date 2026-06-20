@@ -36,7 +36,7 @@ export function validateCronExpression(value) {
 
 async function executeScheduledBatch(id) {
   try {
-    const outcome = await runBatch(id);
+    const outcome = await runBatch(id, { source: "scheduled" });
     if (outcome.accepted) console.log(`[Batch scheduler] ${id} completed`);
   } catch (error) {
     console.error(`[Batch scheduler] ${id} failed`, error);

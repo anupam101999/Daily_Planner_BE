@@ -15,6 +15,7 @@ import {
   updateHolding,
   updateTransaction,
 } from "../controllers/financeController.js";
+import { getPortfolioSnapshots, updatePortfolioSnapshot } from "../controllers/snapshotController.js";
 
 const router = Router();
 
@@ -24,6 +25,8 @@ router.get("/assets/held", getHeldStockOptions);
 router.get("/holdings", getHoldingsFeature);
 router.get("/profit", getProfitFeature);
 router.get("/ledger", getLedgerFeature);
+router.get("/snapshots", getPortfolioSnapshots);
+router.patch("/snapshots/:id", updatePortfolioSnapshot);
 router.post("/sync", syncFinanceQuotes);
 router.post("/holdings", createHolding);
 router.patch("/holdings/:id", updateHolding);

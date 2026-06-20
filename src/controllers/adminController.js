@@ -12,7 +12,7 @@ export async function getAdminBatches(_request, response, next) {
 
 export async function runAdminBatch(request, response, next) {
   try {
-    const outcome = await runBatch(request.params.batchId);
+    const outcome = await runBatch(request.params.batchId, { source: "manual" });
     if (!outcome.found) {
       response.status(404).json({ error: "Batch process not found" });
       return;
@@ -25,6 +25,35 @@ export async function runAdminBatch(request, response, next) {
   } catch (error) {
     next(error);
   }
+}
+
+export async function getAdminLogs(request, response, next) {
+  try {
+    const source = request.query.source === "batch" ? "batch" : "app";
+    const page = Math.max(1, Number(request.query.page || 1));
+    const limit = Math.max(5, Math.min(50, Number(request.query.limit || 10)));
+    const offset = (page - 1) * limit;
+    const filters = [];
+    const values = [];
+    const add = (sql, value) => { values.push(value); filters.push(sql.replace("?", `$${values.length}`)); };
+    if (request.query.date) add(source === "batch" ? "started_at::date=?::date" : "created_at::date=?::date", request.query.date);
+    if (source === "batch" && request.query.status && request.query.status !== "all") add("run_status=?", request.query.status);
+    if (source === "app" && request.query.level && request.query.level !== "all") add("level=?", request.query.level);
+    if (request.query.q) {
+      values.push(`%${String(request.query.q).toLowerCase()}%`);
+      const p = `$${values.length}`;
+      filters.push(source === "batch" ? `(lower(batch_id) like ${p} or lower(coalesce(error_message,'')) like ${p} or lower(result::text) like ${p})`
+        : `(lower(event) like ${p} or lower(message) like ${p} or lower(coalesce(path,'')) like ${p} or lower(meta::text) like ${p})`);
+    }
+    const where = filters.length ? `where ${filters.join(" and ")}` : "";
+    const table = source === "batch" ? "fin_batch_run" : "app_log";
+    const order = source === "batch" ? "started_at" : "created_at";
+    const [rows, count] = await Promise.all([
+      pool.query(`select * from ${table} ${where} order by ${order} desc limit ${limit} offset ${offset}`, values),
+      pool.query(`select count(*)::int total from ${table} ${where}`, values),
+    ]);
+    response.json({ source, logs: rows.rows, pagination: { page, limit, total: count.rows[0].total, totalPages: Math.max(1, Math.ceil(count.rows[0].total / limit)) } });
+  } catch (error) { next(error); }
 }
 
 export async function updateAdminBatchSchedule(request, response, next) {

@@ -5,6 +5,9 @@ import { validateCronExpression } from "../src/services/batchSchedulerService.js
 test("batch scheduler accepts supported daily and interval schedules", () => {
   assert.equal(validateCronExpression("30 9 * * *"), true);
   assert.equal(validateCronExpression("15 */6 * * *"), true);
+  assert.equal(validateCronExpression("0 6 * * 1"), true);
+  assert.equal(validateCronExpression("0 6 1 * *"), true);
+  assert.equal(validateCronExpression("0 6 1 4 *"), true);
 });
 
 test("batch scheduler rejects malformed schedules", () => {
