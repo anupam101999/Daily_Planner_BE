@@ -495,7 +495,7 @@ export async function refreshAllFinanceQuotesForUser(userId) {
 }
 
 export async function refreshAllFinanceQuotesForAllUsers() {
-  const userResult = await pool.query("select distinct user_id::text as id from fin_asset order by user_id");
+  const userResult = await pool.query("select distinct user_id::text as id from fin_asset order by id");
   const results = [];
   for (const row of userResult.rows) {
     const result = await refreshAllFinanceQuotesForUser(row.id);
