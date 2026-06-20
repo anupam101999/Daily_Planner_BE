@@ -144,7 +144,9 @@ export async function getAnalyticsFeature(request, response, next) {
     const benchmark = benchmarkResult.ok ? benchmarkResult.benchmark : unavailableBenchmark(periodWindow.period, benchmarkResult.error);
     const startPrices = new Map();
     const periodPerformance = buildPeriodPerformance(holdings, portfolio.transactions, startPrices, periodWindow.startDate, periodWindow.endDate);
-    const portfolioReturnPercent = periodPerformance.returnPercent;
+    const startingProfit = await loadStartingPortfolioProfit(request.dailyUserId, periodWindow.startDate);
+    const profitChange = buildProfitChange(startingProfit, analytics);
+    const portfolioReturnPercent = profitChange.returnPercent;
     const benchmarkReturnPercent = benchmark.returnPercent;
     const alphaPercent = Number.isFinite(portfolioReturnPercent) && Number.isFinite(benchmarkReturnPercent) ? portfolioReturnPercent - benchmarkReturnPercent : null;
 
@@ -158,9 +160,10 @@ export async function getAnalyticsFeature(request, response, next) {
         totalProfit: analytics.totalProfit,
         profitPercent: portfolioReturnPercent,
         allTimeProfitPercent: analytics.profitPercent,
-        periodProfit: periodPerformance.profit,
-        periodRealizedProfit: periodPerformance.realizedProfit,
-        periodUnrealizedProfit: periodPerformance.unrealizedProfit,
+        periodProfit: profitChange.profit,
+        periodRealizedProfit: profitChange.realizedProfit,
+        periodUnrealizedProfit: profitChange.unrealizedProfit,
+        periodStartProfit: profitChange.startProfit,
         periodStartValue: periodPerformance.startValue,
         periodBuyValue: periodPerformance.buyValue,
         periodSellValue: periodPerformance.sellValue,
@@ -177,8 +180,8 @@ export async function getAnalyticsFeature(request, response, next) {
           label: "Portfolio",
           returnPercent: portfolioReturnPercent,
           value: analytics.currentValue,
-          startValue: periodPerformance.startValue,
-          profit: periodPerformance.profit,
+          startValue: profitChange.startProfit,
+          profit: profitChange.profit,
         },
         benchmark,
         alphaPercent,
@@ -452,8 +455,22 @@ export async function sellHolding(request, response, next) {
 }
 
 export async function refreshAllFinanceQuotesForUser(userId) {
-  const assetResult = await pool.query(`select ${assetColumns} from fin_asset where user_id = $1 order by updated_at desc`, [userId]);
-  const allAssets = assetResult.rows.map(normalizeAsset).filter((asset) => asset.symbol && asset.exchange);
+  const assetResult = await pool.query(
+    `with asset_quantities as (
+       select asset_id,
+         coalesce(sum(case when transaction_type = 'buy' then quantity when transaction_type = 'sell' then -quantity else 0 end), 0) as net_quantity
+       from fin_transaction
+       where user_id = $1
+       group by asset_id
+     )
+     select ${assetColumns}, coalesce(q.net_quantity, 0) as "netQuantity"
+       from fin_asset a
+       left join asset_quantities q on q.asset_id = a.id
+      where a.user_id = $1
+      order by a.updated_at desc`,
+    [userId],
+  );
+  const allAssets = assetResult.rows.filter((row) => Number(row.netQuantity) > 0).map(normalizeAsset).filter((asset) => asset.symbol && asset.exchange);
   const assets = allAssets.filter((asset) => !isOptionsSector(asset));
   const quotes = await refreshAssetQuotes(userId, assets);
   const updated = quotes.filter((quote) => quote?.price).length;
@@ -895,6 +912,41 @@ export function buildPeriodPerformance(holdings, transactions, startPrices, star
     unrealizedCost,
     profit,
     returnPercent: capitalBase > 0 ? (profit / capitalBase) * 100 : null,
+  };
+}
+
+export function buildProfitChange(startingProfit, currentAnalytics) {
+  if (!startingProfit) {
+    return { startProfit: null, profit: null, realizedProfit: null, unrealizedProfit: null, returnPercent: null };
+  }
+  const startProfit = inr(startingProfit.totalProfit);
+  const profit = inr(currentAnalytics.totalProfit - startProfit);
+  const realizedProfit = inr(currentAnalytics.realizedProfit - startingProfit.realizedProfit);
+  const unrealizedProfit = inr(currentAnalytics.unrealizedProfit - startingProfit.unrealizedProfit);
+  return {
+    startProfit,
+    profit,
+    realizedProfit,
+    unrealizedProfit,
+    returnPercent: startProfit !== 0 ? (profit / Math.abs(startProfit)) * 100 : null,
+  };
+}
+
+async function loadStartingPortfolioProfit(userId, startDate) {
+  const result = await pool.query(
+    `select total_profit as "totalProfit", realized_profit as "realizedProfit", unrealized_profit as "unrealizedProfit"
+       from fin_portfolio_snapshot
+      where user_id = $1 and snapshot_date <= $2
+      order by snapshot_date desc, captured_at desc
+      limit 1`,
+    [userId, startDate],
+  );
+  if (!result.rowCount) return null;
+  const row = result.rows[0];
+  return {
+    totalProfit: Number(row.totalProfit || 0),
+    realizedProfit: Number(row.realizedProfit || 0),
+    unrealizedProfit: Number(row.unrealizedProfit || 0),
   };
 }
 

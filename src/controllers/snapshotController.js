@@ -1,5 +1,6 @@
 import { pool } from "../config/database.js";
 import { snapshotTypes } from "../services/portfolioSnapshotService.js";
+import { backfillPortfolioSnapshots } from "../services/portfolioSnapshotBackfillService.js";
 
 const snapshotColumns = `id::text,snapshot_type as "snapshotType",snapshot_date::text as "snapshotDate",
   period_start::text as "periodStart",period_end::text as "periodEnd",current_value as "currentValue",
@@ -70,6 +71,14 @@ export async function updatePortfolioSnapshot(request, response, next) {
     );
     response.json({ snapshot: normalizeSnapshot(result.rows[0]) });
   } catch (error) { next(error); }
+}
+
+export async function backfillHistoricalSnapshots(request, response, next) {
+  try {
+    response.json(await backfillPortfolioSnapshots(request.dailyUserId));
+  } catch (error) {
+    next(error);
+  }
 }
 
 function normalizeSnapshot(row) {
