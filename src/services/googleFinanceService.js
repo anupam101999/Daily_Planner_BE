@@ -105,45 +105,6 @@ export async function getGoogleFinanceQuotes(tickers) {
   });
 }
 
-export async function getHistoricalStockPrices(asset, startDate, endDate) {
-  const ticker = yahooTicker(asset.symbol, asset.exchange);
-  if (!ticker) throw new Error(`Historical prices are unavailable for ${asset.symbol || asset.name || "asset"}`);
-  const queryStart = shiftDate(startDate, -7);
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${unixDate(queryStart)}&period2=${unixDate(nextDate(endDate))}&interval=1d&events=history`;
-  const response = await fetch(url, { headers: yahooHeaders() });
-  if (!response.ok) throw new Error(`Historical price request failed for ${ticker}: ${response.status}`);
-  const payload = await response.json();
-  const result = payload?.chart?.result?.[0];
-  const prices = (result?.timestamp || []).map((timestamp, index) => ({
-    date: new Date(Number(timestamp) * 1000).toISOString().slice(0, 10),
-    price: Number(result?.indicators?.quote?.[0]?.close?.[index]),
-  })).filter((point) => point.date && Number.isFinite(point.price) && point.price > 0);
-  if (!prices.length) throw new Error(`Yahoo Finance returned no historical prices for ${ticker}`);
-  return { ticker, prices, source: "Yahoo Finance" };
-}
-
-function yahooTicker(symbol, exchange) {
-  const normalizedSymbol = String(symbol || "").trim().toUpperCase();
-  const normalizedExchange = String(exchange || "").trim().toUpperCase();
-  if (!normalizedSymbol || normalizedExchange === "MANUAL" || normalizedExchange === "MUTF_IN") return "";
-  if (normalizedExchange === "NSE") return normalizedSymbol.endsWith(".NS") ? normalizedSymbol : `${normalizedSymbol}.NS`;
-  if (["BSE", "BOM"].includes(normalizedExchange)) return normalizedSymbol.endsWith(".BO") ? normalizedSymbol : `${normalizedSymbol}.BO`;
-  return normalizedSymbol;
-}
-
-function yahooHeaders() {
-  return {
-    "Accept": "application/json",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-  };
-}
-
-function shiftDate(value, days) {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 function normalizeTickerPart(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "_");
 }

@@ -1,6 +1,5 @@
 import { pool } from "../config/database.js";
 import { snapshotTypes } from "../services/portfolioSnapshotService.js";
-import { backfillPortfolioSnapshots } from "../services/portfolioSnapshotBackfillService.js";
 
 const snapshotColumns = `id::text,snapshot_type as "snapshotType",snapshot_date::text as "snapshotDate",
   period_start::text as "periodStart",period_end::text as "periodEnd",current_value as "currentValue",
@@ -18,8 +17,16 @@ export async function getPortfolioSnapshots(request, response, next) {
     const page = Math.max(1, Number(request.query.page || 1));
     const pageSize = Math.max(6, Math.min(24, Number(request.query.pageSize || 9)));
     const offset = (page - 1) * pageSize;
-    const params = type === "all" ? [request.dailyUserId] : [request.dailyUserId, type];
-    const where = `where user_id=$1${type === "all" ? "" : " and snapshot_type=$2"}`;
+    const startDate = validSnapshotDate(request.query.startDate);
+    const endDate = validSnapshotDate(request.query.endDate);
+    const params = [request.dailyUserId];
+    const conditions = ["user_id=$1"];
+    if (type !== "all") { params.push(type); conditions.push(`snapshot_type=$${params.length}`); }
+    if (startDate && endDate && startDate <= endDate) {
+      params.push(startDate); conditions.push(`snapshot_date >= $${params.length}`);
+      params.push(endDate); conditions.push(`snapshot_date <= $${params.length}`);
+    }
+    const where = `where ${conditions.join(" and ")}`;
     const [rows, count, latest] = await Promise.all([
       pool.query(`select ${snapshotColumns} from fin_portfolio_snapshot ${where} order by snapshot_date desc,captured_at desc limit ${pageSize} offset ${offset}`, params),
       pool.query(`select count(*)::int total from fin_portfolio_snapshot ${where}`, params),
@@ -33,10 +40,19 @@ export async function getPortfolioSnapshots(request, response, next) {
       pageSize,
       total: count.rows[0].total,
       pageCount: Math.max(1, Math.ceil(count.rows[0].total / pageSize)),
+      startDate: startDate || "",
+      endDate: endDate || "",
     });
   } catch (error) {
     next(error);
   }
+}
+
+function validSnapshotDate(value) {
+  const text = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "";
+  const date = new Date(`${text}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== text ? "" : text;
 }
 
 export async function updatePortfolioSnapshot(request, response, next) {
@@ -71,14 +87,6 @@ export async function updatePortfolioSnapshot(request, response, next) {
     );
     response.json({ snapshot: normalizeSnapshot(result.rows[0]) });
   } catch (error) { next(error); }
-}
-
-export async function backfillHistoricalSnapshots(request, response, next) {
-  try {
-    response.json(await backfillPortfolioSnapshots(request.dailyUserId));
-  } catch (error) {
-    next(error);
-  }
 }
 
 function normalizeSnapshot(row) {
