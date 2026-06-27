@@ -187,21 +187,14 @@ export async function deleteAdminDatabaseRow(request, response, next) {
 }
 
 export async function runAdminDatabaseQuery(request, response, next) {
-  let client;
   try {
-    client = await pool.connect();
     const sql = String(request.body?.sql || "").trim();
-    if (!/^(select|with|show|explain)\b/i.test(sql)) throw badAdminRequest("Raw SQL console allows read-only SELECT/WITH/SHOW/EXPLAIN queries. Use table controls for insert, update, and delete.");
-    if (sql.includes(";")) throw badAdminRequest("Run one read-only statement at a time");
-    await client.query("begin read only");
-    const result = await client.query(sql);
-    await client.query("rollback");
+    if (!sql) throw badAdminRequest("Enter a SQL statement");
+    if (sql.includes(";")) throw badAdminRequest("Run one SQL statement at a time");
+    const result = await pool.query(sql);
     response.json({ rowCount: result.rowCount, rows: result.rows, fields: result.fields?.map((field) => field.name) || [] });
   } catch (error) {
-    await client?.query("rollback").catch(() => {});
     handleAdminDatabaseError(error, response, next);
-  } finally {
-    client?.release();
   }
 }
 
