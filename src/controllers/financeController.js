@@ -725,7 +725,7 @@ function assertValidTransactionSequence(transactions, assetLabel) {
 }
 
 async function refreshAssetQuotes(userId, assets, provider) {
-  const targets = assets.filter((asset) => asset.symbol && asset.exchange).map((asset) => ({ symbol: asset.symbol, exchange: asset.exchange }));
+  const targets = assets.filter((asset) => asset.symbol && asset.exchange).map((asset) => ({ symbol: asset.symbol, exchange: asset.exchange, name: asset.stockName || asset.name }));
   const quotes = await getMarketFinanceQuotes(targets, provider);
   await Promise.all(quotes.map((quote, index) => quote?.price ? persistAssetQuote(userId, assets[index].id, quote) : null));
   quotes.forEach((quote, index) => {
@@ -753,6 +753,8 @@ function sortBuiltHoldings(holdings, sort) {
   const sorters = {
     avgbuyDesc: (left, right) => Number(right.averagePrice || 0) - Number(left.averagePrice || 0),
     avgbuyAsc: (left, right) => Number(left.averagePrice || 0) - Number(right.averagePrice || 0),
+    priceDesc: (left, right) => Number(right.currentPrice || 0) - Number(left.currentPrice || 0),
+    priceAsc: (left, right) => Number(left.currentPrice || 0) - Number(right.currentPrice || 0),
     costDesc: (left, right) => holdingCostOrAverageSell(right) - holdingCostOrAverageSell(left),
     costAsc: (left, right) => holdingCostOrAverageSell(left) - holdingCostOrAverageSell(right),
     dateDesc: (left, right) => compareText(right.sellDate || right.purchaseDate, left.sellDate || left.purchaseDate),
@@ -1107,6 +1109,8 @@ function readSort(value, fallback) {
     "unitsAsc",
     "avgbuyDesc",
     "avgbuyAsc",
+    "priceDesc",
+    "priceAsc",
     "costDesc",
     "costAsc",
     "returnDesc",
