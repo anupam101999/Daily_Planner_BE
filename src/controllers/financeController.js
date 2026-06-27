@@ -12,6 +12,7 @@ const assetColumns = `
   exchange,
   sector,
   notes,
+  skip_quote_sync as "skipQuoteSync",
   last_price as "lastPrice",
   last_price_at as "lastPriceAt",
   created_at as "createdAt",
@@ -474,15 +475,16 @@ export async function refreshAllFinanceQuotesForUser(userId) {
   );
   const allAssets = assetResult.rows.filter((row) => Number(row.netQuantity) > 0).map(normalizeAsset).filter((asset) => asset.symbol && asset.exchange);
   const assets = allAssets.filter((asset) => !isOptionsSector(asset));
+  const syncAssets = assets.filter((asset) => !asset.skipQuoteSync);
   const settings = await getFinanceSettings();
-  const quotes = await refreshAssetQuotes(userId, assets, settings.financeQuoteProvider);
+  const quotes = await refreshAssetQuotes(userId, syncAssets, settings.financeQuoteProvider);
   const updated = quotes.filter((quote) => quote?.price).length;
   const failed = quotes.length - updated;
   const failures = quotes.map((quote, index) => quote?.price ? null : ({
-    assetId: assets[index]?.id,
-    name: assets[index]?.stockName,
-    symbol: assets[index]?.symbol,
-    exchange: assets[index]?.exchange,
+    assetId: syncAssets[index]?.id,
+    name: syncAssets[index]?.stockName,
+    symbol: syncAssets[index]?.symbol,
+    exchange: syncAssets[index]?.exchange,
     error: quote?.error || "Quote unavailable",
   })).filter(Boolean);
   if (failures.length) appLog.warn("finance.quote_sync_partial", { userId, message: `${failures.length} market quote(s) failed`, failures });
@@ -492,7 +494,9 @@ export async function refreshAllFinanceQuotesForUser(userId) {
     failed,
     failures,
     checked: quotes.length,
-    skipped: allAssets.length - assets.length,
+    skipped: allAssets.length - syncAssets.length,
+    skippedOptions: allAssets.length - assets.length,
+    skippedByUser: assets.length - syncAssets.length,
     provider: settings.financeQuoteProvider,
     syncedAt: new Date().toISOString(),
   };
@@ -1152,6 +1156,7 @@ function normalizeAsset(row) {
     exchange: normalizeExchange(row.exchange),
     sector: row.sector || "",
     notes: row.notes || "",
+    skipQuoteSync: Boolean(row.skipQuoteSync ?? row.skip_quote_sync),
     lastPrice: (row.lastPrice ?? row.last_price) == null ? null : number(row.lastPrice ?? row.last_price),
     lastPriceAt: row.lastPriceAt || row.last_price_at || null,
     createdAt: row.createdAt || row.created_at,

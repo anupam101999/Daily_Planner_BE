@@ -135,6 +135,7 @@ export async function initDatabase() {
       exchange text not null default 'NSE',
       sector text not null default '',
       notes text not null default '',
+      skip_quote_sync boolean not null default false,
       last_price numeric(18, 4),
       last_price_at timestamptz,
       created_at timestamptz not null default now(),
@@ -146,11 +147,16 @@ export async function initDatabase() {
     create unique index if not exists fin_asset_user_symbol_exchange_uidx
       on fin_asset (user_id, upper(trim(symbol)), upper(trim(exchange)));
 
+    alter table fin_asset add column if not exists skip_quote_sync boolean not null default false;
+
     create index if not exists fin_asset_user_updated_idx
       on fin_asset (user_id, updated_at desc);
 
     create index if not exists fin_asset_user_exchange_idx
       on fin_asset (user_id, exchange);
+
+    create index if not exists fin_asset_user_skip_quote_sync_idx
+      on fin_asset (user_id, skip_quote_sync);
 
     create index if not exists fin_asset_user_last_price_idx
       on fin_asset (user_id, last_price_at desc)

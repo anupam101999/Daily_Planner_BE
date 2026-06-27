@@ -32,6 +32,179 @@ export async function updateAdminSettings(request, response, next) {
   }
 }
 
+export async function getAdminQuoteAssets(_request, response, next) {
+  try {
+    const result = await pool.query(
+      `
+        select
+          a.id::text,
+          a.user_id::text as "userId",
+          u.name as "userName",
+          a.name,
+          a.symbol,
+          a.exchange,
+          a.sector,
+          a.skip_quote_sync as "skipQuoteSync",
+          a.last_price as "lastPrice",
+          a.last_price_at as "lastPriceAt",
+          coalesce(sum(case when t.transaction_type = 'buy' then t.quantity when t.transaction_type = 'sell' then -t.quantity else 0 end), 0) as quantity
+        from fin_asset a
+        join daily_user u on u.id = a.user_id
+        left join fin_transaction t on t.asset_id = a.id and t.user_id = a.user_id
+        group by a.id, u.name
+        having coalesce(sum(case when t.transaction_type = 'buy' then t.quantity when t.transaction_type = 'sell' then -t.quantity else 0 end), 0) > 0
+        order by a.skip_quote_sync desc, a.name asc
+      `,
+    );
+    response.json({ assets: result.rows.map((row) => ({ ...row, quantity: Number(row.quantity || 0), lastPrice: row.lastPrice == null ? null : Number(row.lastPrice) })) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateAdminQuoteAsset(request, response, next) {
+  try {
+    const result = await pool.query(
+      `
+        update fin_asset
+           set skip_quote_sync = $2, updated_at = now()
+         where id = $1
+         returning id::text, user_id::text as "userId", name, symbol, exchange, sector, skip_quote_sync as "skipQuoteSync", last_price as "lastPrice", last_price_at as "lastPriceAt"
+      `,
+      [request.params.assetId, request.body?.skipQuoteSync === true],
+    );
+    if (!result.rowCount) {
+      response.status(404).json({ error: "Finance asset not found" });
+      return;
+    }
+    const row = result.rows[0];
+    response.json({ asset: { ...row, lastPrice: row.lastPrice == null ? null : Number(row.lastPrice) } });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAdminDatabaseTables(_request, response, next) {
+  try {
+    const tables = await listDatabaseTables();
+    const counts = await Promise.all(tables.map(async (table) => {
+      const result = await pool.query(`select count(*)::int as total from ${quoteTable(table)} ${tableWhere(table)}`);
+      return { ...table, total: result.rows[0]?.total || 0 };
+    }));
+    response.json({ tables: counts });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAdminDatabaseTable(request, response, next) {
+  try {
+    const table = await requireKnownTable(request.params.table);
+    const page = Math.max(1, Number(request.query.page || 1));
+    const pageSize = Math.max(5, Math.min(100, Number(request.query.pageSize || 25)));
+    const offset = (page - 1) * pageSize;
+    const search = String(request.query.search || "").trim();
+    const schema = await getTableSchema(table);
+    const whereParts = [];
+    const values = [];
+    if (tableWhere(table)) whereParts.push(tableWhere(table).replace(/^where\s+/i, ""));
+    if (search) {
+      values.push(`%${search.toLowerCase()}%`);
+      whereParts.push(`lower(to_jsonb(t)::text) like $${values.length}`);
+    }
+    const where = whereParts.length ? `where ${whereParts.join(" and ")}` : "";
+    const order = schema.primaryKey.length ? schema.primaryKey.map((column) => `t.${quoteIdent(column)} desc`).join(", ") : "t.ctid desc";
+    values.push(pageSize, offset);
+    const rowsResult = await pool.query(
+      `select t.ctid::text as "__ctid", row_to_json(t) as row from ${quoteTable(table)} t ${where} order by ${order} limit $${values.length - 1} offset $${values.length}`,
+      values,
+    );
+    const countResult = await pool.query(`select count(*)::int as total from ${quoteTable(table)} t ${where}`, values.slice(0, -2));
+    response.json({
+      table,
+      schema,
+      rows: rowsResult.rows.map((item) => {
+        const row = { ...item.row, __ctid: item.__ctid };
+        return { ...row, __rowKey: buildRowKey(row, schema.primaryKey) };
+      }),
+      pagination: { page, pageSize, total: countResult.rows[0]?.total || 0, totalPages: Math.max(1, Math.ceil((countResult.rows[0]?.total || 0) / pageSize)) },
+    });
+  } catch (error) {
+    handleAdminDatabaseError(error, response, next);
+  }
+}
+
+export async function insertAdminDatabaseRow(request, response, next) {
+  try {
+    const table = await requireKnownTable(request.params.table);
+    const schema = await getTableSchema(table);
+    const writable = writablePayload(request.body?.row || {}, schema);
+    if (!Object.keys(writable).length) throw badAdminRequest("Provide at least one writable column");
+    const columns = Object.keys(writable);
+    const values = Object.values(writable);
+    const placeholders = values.map((_, index) => `$${index + 1}`);
+    const result = await pool.query(
+      `insert into ${quoteTable(table)} (${columns.map(quoteIdent).join(", ")}) values (${placeholders.join(", ")}) returning *`,
+      values,
+    );
+    response.status(201).json({ row: result.rows[0] });
+  } catch (error) {
+    handleAdminDatabaseError(error, response, next);
+  }
+}
+
+export async function updateAdminDatabaseRow(request, response, next) {
+  try {
+    const table = await requireKnownTable(request.params.table);
+    const schema = await getTableSchema(table);
+    const writable = writablePayload(request.body?.row || {}, schema);
+    if (!Object.keys(writable).length) throw badAdminRequest("Provide at least one writable column");
+    const values = Object.values(writable);
+    const assignments = Object.keys(writable).map((column, index) => `${quoteIdent(column)} = $${index + 1}`);
+    const { where, params } = rowLocator(request.body?.key, schema, values.length + 1);
+    const result = await pool.query(
+      `update ${quoteTable(table)} set ${assignments.join(", ")} where ${where} returning *`,
+      [...values, ...params],
+    );
+    if (!result.rowCount) throw notFoundAdminRequest("Row not found");
+    response.json({ row: result.rows[0] });
+  } catch (error) {
+    handleAdminDatabaseError(error, response, next);
+  }
+}
+
+export async function deleteAdminDatabaseRow(request, response, next) {
+  try {
+    const table = await requireKnownTable(request.params.table);
+    const schema = await getTableSchema(table);
+    const { where, params } = rowLocator(request.body?.key, schema, 1);
+    const result = await pool.query(`delete from ${quoteTable(table)} where ${where}`, params);
+    if (!result.rowCount) throw notFoundAdminRequest("Row not found");
+    response.status(204).end();
+  } catch (error) {
+    handleAdminDatabaseError(error, response, next);
+  }
+}
+
+export async function runAdminDatabaseQuery(request, response, next) {
+  let client;
+  try {
+    client = await pool.connect();
+    const sql = String(request.body?.sql || "").trim();
+    if (!/^(select|with|show|explain)\b/i.test(sql)) throw badAdminRequest("Raw SQL console allows read-only SELECT/WITH/SHOW/EXPLAIN queries. Use table controls for insert, update, and delete.");
+    if (sql.includes(";")) throw badAdminRequest("Run one read-only statement at a time");
+    await client.query("begin read only");
+    const result = await client.query(sql);
+    await client.query("rollback");
+    response.json({ rowCount: result.rowCount, rows: result.rows, fields: result.fields?.map((field) => field.name) || [] });
+  } catch (error) {
+    await client?.query("rollback").catch(() => {});
+    handleAdminDatabaseError(error, response, next);
+  } finally {
+    client?.release();
+  }
+}
+
 export async function runAdminBatch(request, response, next) {
   try {
     const outcome = await runBatch(request.params.batchId, { source: "manual" });
@@ -189,4 +362,122 @@ function buildWarnings(users) {
 
 function percentage(value, total) {
   return total ? Math.round((Number(value) / Number(total)) * 100) : 0;
+}
+
+async function listDatabaseTables() {
+  const result = await pool.query(
+    `
+      select table_schema as schema, table_name as name
+        from information_schema.tables
+       where table_schema = 'public'
+         and table_type = 'BASE TABLE'
+       order by table_name
+    `,
+  );
+  return result.rows;
+}
+
+async function requireKnownTable(name) {
+  const normalized = String(name || "").trim();
+  const tables = await listDatabaseTables();
+  const table = tables.find((item) => item.name === normalized);
+  if (!table) throw notFoundAdminRequest("Database table not found");
+  return table;
+}
+
+async function getTableSchema(table) {
+  const [columnsResult, pkResult] = await Promise.all([
+    pool.query(
+      `
+        select column_name as name, data_type as "dataType", is_nullable = 'YES' as nullable,
+               column_default as "defaultValue", identity_generation as "identityGeneration"
+          from information_schema.columns
+         where table_schema = $1 and table_name = $2
+         order by ordinal_position
+      `,
+      [table.schema, table.name],
+    ),
+    pool.query(
+      `
+        select kcu.column_name as name
+          from information_schema.table_constraints tc
+          join information_schema.key_column_usage kcu
+            on kcu.constraint_name = tc.constraint_name
+           and kcu.table_schema = tc.table_schema
+           and kcu.table_name = tc.table_name
+         where tc.constraint_type = 'PRIMARY KEY'
+           and tc.table_schema = $1
+           and tc.table_name = $2
+         order by kcu.ordinal_position
+      `,
+      [table.schema, table.name],
+    ),
+  ]);
+  return {
+    columns: columnsResult.rows,
+    primaryKey: pkResult.rows.map((row) => row.name),
+  };
+}
+
+function buildRowKey(row, primaryKey) {
+  if (primaryKey.length) return Object.fromEntries(primaryKey.map((column) => [column, row[column]]));
+  return { __ctid: row.__ctid };
+}
+
+function writablePayload(row, schema) {
+  const columnMap = new Map(schema.columns.map((column) => [column.name, column]));
+  return Object.fromEntries(Object.entries(row)
+    .filter(([column]) => columnMap.has(column) && !column.startsWith("__"))
+    .filter(([column, value]) => !(value === "" && columnMap.get(column)?.nullable))
+    .map(([column, value]) => [column, value === "" && columnMap.get(column)?.nullable ? null : value]));
+}
+
+function rowLocator(key, schema, startIndex) {
+  const rowKey = key || {};
+  if (schema.primaryKey.length) {
+    const params = schema.primaryKey.map((column) => rowKey[column]);
+    if (params.some((value) => value == null || value === "")) throw badAdminRequest("Primary key is required");
+    return {
+      where: schema.primaryKey.map((column, index) => `${quoteIdent(column)} = $${startIndex + index}`).join(" and "),
+      params,
+    };
+  }
+  if (!rowKey.__ctid) throw badAdminRequest("Row locator is required");
+  return { where: `ctid = $${startIndex}::tid`, params: [rowKey.__ctid] };
+}
+
+function tableWhere(table) {
+  return table.schema === "public" ? "" : "";
+}
+
+function quoteTable(table) {
+  return `${quoteIdent(table.schema)}.${quoteIdent(table.name)}`;
+}
+
+function quoteIdent(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function badAdminRequest(message) {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
+}
+
+function notFoundAdminRequest(message) {
+  const error = new Error(message);
+  error.status = 404;
+  return error;
+}
+
+function handleAdminDatabaseError(error, response, next) {
+  if (error.status) {
+    response.status(error.status).json({ error: error.message, code: "ADMIN_DATABASE_ERROR" });
+    return;
+  }
+  if (["23503", "23505", "23514", "22P02", "22003", "42703", "42601"].includes(error.code)) {
+    response.status(400).json({ error: error.message, code: error.code });
+    return;
+  }
+  next(error);
 }
