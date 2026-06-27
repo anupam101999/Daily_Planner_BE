@@ -77,6 +77,7 @@ export function buildPosition(asset, transactions) {
   const grossSoldCost = closedTrades.reduce((total, trade) => total + trade.grossSoldCost, 0);
   const grossRealizedProfit = money(sellGross - grossSoldCost);
   const firstBuy = rows.find((row) => row.transactionType === "buy");
+  const averagePrice = quantity ? remainingCost / quantity : 0;
 
   return {
     id: asset.id,
@@ -88,7 +89,7 @@ export function buildPosition(asset, transactions) {
     purchaseDate: firstBuy?.transactionDate || today(),
     quantity,
     soldQuantity: round(sellQuantity, 6),
-    averagePrice: buyQuantity ? buyGross / buyQuantity : 0,
+    averagePrice,
     averageSellPrice: sellQuantity ? sellGross / sellQuantity : 0,
     sellValue,
     soldCost,

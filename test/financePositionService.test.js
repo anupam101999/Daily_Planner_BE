@@ -36,10 +36,25 @@ test("FIFO consumes the oldest buy lots and preserves the remaining cost basis",
   const position = buildPosition(asset, rows);
   assert.equal(position.quantity, 50);
   assert.equal(position.investedValue, 6000);
+  assert.equal(position.averagePrice, 120);
   assert.equal(position.soldCost, 16100);
   assert.equal(position.sellValue, 20850);
   assert.equal(position.realizedProfit, 4750);
   assert.equal(position.closedTrades[0].averagePrice, 106.66666666666667);
+});
+
+test("open average price ignores fully sold earlier lots", () => {
+  const rows = [
+    transaction(1, "2025-10-25", "buy", 206, 156.6919, 27.6599),
+    transaction(2, "2025-11-25", "sell", 206, 173.5579, 30.6372),
+    transaction(3, "2026-03-13", "buy", 430, 117.37, 59.8),
+  ];
+
+  const position = buildPosition(asset, rows);
+  assert.equal(position.quantity, 430);
+  assert.equal(position.investedValue, 50528.9);
+  assert.equal(position.averagePrice, 50528.9 / 430);
+  assert.equal(position.closedTrades[0].averagePrice, 156.6919);
 });
 
 test("each sell is returned as a distinct closed trade", () => {
