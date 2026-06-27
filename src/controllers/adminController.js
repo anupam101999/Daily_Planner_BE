@@ -1,10 +1,32 @@
 import { pool } from "../config/database.js";
 import { getBatches, runBatch, saveBatchSchedule } from "../services/batchService.js";
 import { rescheduleBatch, validateCronExpression } from "../services/batchSchedulerService.js";
+import { getFinanceSettings, saveFinanceSettings } from "../services/financeSettingsService.js";
 
 export async function getAdminBatches(_request, response, next) {
   try {
     response.json({ batches: await getBatches() });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAdminSettings(_request, response, next) {
+  try {
+    response.json({ settings: await getFinanceSettings() });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateAdminSettings(request, response, next) {
+  try {
+    const provider = String(request.body?.financeQuoteProvider || "").trim().toLowerCase();
+    if (!["nse", "screener"].includes(provider)) {
+      response.status(400).json({ error: "Quote provider must be nse or screener", code: "INVALID_QUOTE_PROVIDER" });
+      return;
+    }
+    response.json({ settings: await saveFinanceSettings({ financeQuoteProvider: provider }) });
   } catch (error) {
     next(error);
   }

@@ -1,5 +1,5 @@
 import { pool } from "../config/database.js";
-import { buildAnalytics, buildHoldings, buildPeriodPerformance, loadPortfolio } from "../controllers/financeController.js";
+import { buildAnalytics, buildHoldings, buildPeriodPerformance, loadPortfolio, refreshAllFinanceQuotesForAllUsers } from "../controllers/financeController.js";
 import { getNiftyBenchmark } from "./googleFinanceService.js";
 
 export const snapshotTypes = ["daily", "weekly", "monthly", "fiscal_year"];
@@ -8,6 +8,7 @@ const timezone = "Asia/Kolkata";
 export async function capturePortfolioSnapshots(type, date = indiaDate()) {
   if (!snapshotTypes.includes(type)) throw new Error(`Unsupported portfolio snapshot type: ${type}`);
   const period = snapshotPeriod(type, date);
+  const quoteSync = await refreshAllFinanceQuotesForAllUsers();
   const users = await pool.query("select distinct user_id as id from fin_asset order by user_id");
   const benchmark = await loadSnapshotBenchmark(period.start, date);
   let captured = 0;
@@ -43,7 +44,7 @@ export async function capturePortfolioSnapshots(type, date = indiaDate()) {
     );
     captured += 1;
   }
-  return { type, snapshotDate: date, captured, benchmark };
+  return { type, snapshotDate: date, captured, benchmark, quoteSync };
 }
 
 async function loadSnapshotBenchmark(startDate, endDate) {

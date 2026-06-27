@@ -289,6 +289,28 @@ export async function initDatabase() {
     alter table fin_portfolio_snapshot add column if not exists nifty_return_percent numeric(18, 6);
     alter table fin_portfolio_snapshot add column if not exists alpha_percent numeric(18, 6);
     alter table fin_portfolio_snapshot add column if not exists benchmark jsonb not null default '{}'::jsonb;
+    alter table daily_setting add column if not exists finance_quote_provider text not null default 'nse';
+  `);
+
+  await pool.query(`
+    update daily_setting
+       set finance_quote_provider = 'nse'
+     where finance_quote_provider is null
+        or finance_quote_provider not in ('nse', 'screener');
+
+    do $$
+    begin
+      if not exists (
+        select 1
+          from pg_constraint
+         where conrelid = 'public.daily_setting'::regclass
+           and conname = 'daily_setting_finance_quote_provider_valid'
+      ) then
+        alter table public.daily_setting
+          add constraint daily_setting_finance_quote_provider_valid
+          check (finance_quote_provider in ('nse', 'screener'));
+      end if;
+    end $$;
   `);
 
   if (hasTrigram) {

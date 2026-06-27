@@ -1,5 +1,7 @@
 import { pool } from "../config/database.js";
-import { getGoogleFinanceQuotes, getNiftyBenchmark } from "../services/googleFinanceService.js";
+import { getNiftyBenchmark } from "../services/googleFinanceService.js";
+import { getMarketFinanceQuotes } from "../services/marketQuoteService.js";
+import { getFinanceSettings } from "../services/financeSettingsService.js";
 import { appLog } from "../services/appLogService.js";
 import { buildClosedTrades, buildPosition, validateTransactionSequence } from "../services/financePositionService.js";
 
@@ -472,7 +474,8 @@ export async function refreshAllFinanceQuotesForUser(userId) {
   );
   const allAssets = assetResult.rows.filter((row) => Number(row.netQuantity) > 0).map(normalizeAsset).filter((asset) => asset.symbol && asset.exchange);
   const assets = allAssets.filter((asset) => !isOptionsSector(asset));
-  const quotes = await refreshAssetQuotes(userId, assets);
+  const settings = await getFinanceSettings();
+  const quotes = await refreshAssetQuotes(userId, assets, settings.financeQuoteProvider);
   const updated = quotes.filter((quote) => quote?.price).length;
   const failed = quotes.length - updated;
   const failures = quotes.map((quote, index) => quote?.price ? null : ({
@@ -490,6 +493,7 @@ export async function refreshAllFinanceQuotesForUser(userId) {
     failures,
     checked: quotes.length,
     skipped: allAssets.length - assets.length,
+    provider: settings.financeQuoteProvider,
     syncedAt: new Date().toISOString(),
   };
 }
@@ -720,9 +724,9 @@ function assertValidTransactionSequence(transactions, assetLabel) {
   return validation;
 }
 
-async function refreshAssetQuotes(userId, assets) {
+async function refreshAssetQuotes(userId, assets, provider) {
   const targets = assets.filter((asset) => asset.symbol && asset.exchange).map((asset) => ({ symbol: asset.symbol, exchange: asset.exchange }));
-  const quotes = await getGoogleFinanceQuotes(targets);
+  const quotes = await getMarketFinanceQuotes(targets, provider);
   await Promise.all(quotes.map((quote, index) => quote?.price ? persistAssetQuote(userId, assets[index].id, quote) : null));
   quotes.forEach((quote, index) => {
     if (quote?.price) {
