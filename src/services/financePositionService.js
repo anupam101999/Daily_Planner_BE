@@ -25,6 +25,7 @@ export function buildPosition(asset, transactions) {
         remaining: row.quantity,
         unitGrossCost: row.price,
         unitCost: (gross + row.charges) / row.quantity,
+        unitCharges: row.charges / row.quantity,
       });
       continue;
     }
@@ -67,6 +68,7 @@ export function buildPosition(asset, transactions) {
   const quantity = round(lots.reduce((total, lot) => total + lot.remaining, 0), 6);
   const remainingCost = money(lots.reduce((total, lot) => total + lot.remaining * lot.unitCost, 0));
   const remainingGrossCost = money(lots.reduce((total, lot) => total + lot.remaining * lot.unitGrossCost, 0));
+  const remainingCharges = money(lots.reduce((total, lot) => total + lot.remaining * lot.unitCharges, 0));
   const soldCost = money(closedTrades.reduce((total, trade) => total + trade.soldCost, 0));
   const sellValue = money(closedTrades.reduce((total, trade) => total + trade.sellValue, 0));
   const currentPrice = asset.lastPrice || (buyQuantity ? buyGross / buyQuantity : 0);
@@ -77,7 +79,7 @@ export function buildPosition(asset, transactions) {
   const grossSoldCost = closedTrades.reduce((total, trade) => total + trade.grossSoldCost, 0);
   const grossRealizedProfit = money(sellGross - grossSoldCost);
   const firstBuy = rows.find((row) => row.transactionType === "buy");
-  const averagePrice = quantity ? remainingCost / quantity : 0;
+  const averagePrice = quantity ? money(remainingGrossCost / quantity) : 0;
 
   return {
     id: asset.id,
@@ -94,7 +96,7 @@ export function buildPosition(asset, transactions) {
     sellValue,
     soldCost,
     currentPrice,
-    charges: firstBuy?.charges || 0,
+    charges: remainingCharges,
     investedValue: remainingCost,
     currentValue,
     profitLoss,

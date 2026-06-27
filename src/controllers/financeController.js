@@ -747,6 +747,14 @@ export function buildHoldings(assets, transactions) {
 
 function sortBuiltHoldings(holdings, sort) {
   const sorters = {
+    avgbuyDesc: (left, right) => Number(right.averagePrice || 0) - Number(left.averagePrice || 0),
+    avgbuyAsc: (left, right) => Number(left.averagePrice || 0) - Number(right.averagePrice || 0),
+    costDesc: (left, right) => holdingCostOrAverageSell(right) - holdingCostOrAverageSell(left),
+    costAsc: (left, right) => holdingCostOrAverageSell(left) - holdingCostOrAverageSell(right),
+    dateDesc: (left, right) => compareText(right.sellDate || right.purchaseDate, left.sellDate || left.purchaseDate),
+    dateAsc: (left, right) => compareText(left.sellDate || left.purchaseDate, right.sellDate || right.purchaseDate),
+    unitsDesc: (left, right) => holdingUnits(right) - holdingUnits(left),
+    unitsAsc: (left, right) => holdingUnits(left) - holdingUnits(right),
     valueDesc: (left, right) => currentOrSoldValue(right) - currentOrSoldValue(left),
     valueAsc: (left, right) => currentOrSoldValue(left) - currentOrSoldValue(right),
     returnDesc: (left, right) => holdingReturnPercent(right) - holdingReturnPercent(left),
@@ -757,6 +765,14 @@ function sortBuiltHoldings(holdings, sort) {
     nameDesc: (left, right) => compareText(right.stockName || right.symbol, left.stockName || left.symbol),
   };
   return [...holdings].sort(sorters[sort] || sorters.valueDesc);
+}
+
+function holdingCostOrAverageSell(holding) {
+  return Number(holding.status === "sold" ? holding.averageSellPrice : holding.investedValue || 0);
+}
+
+function holdingUnits(holding) {
+  return Number(holding.status === "sold" ? holding.soldQuantity : holding.quantity || 0);
 }
 
 function currentOrSoldValue(holding) {
@@ -788,6 +804,7 @@ export function buildAnalytics(holdings, transactions) {
     id: holding.id,
     label: holding.stockName,
     symbol: holding.symbol,
+    exchange: holding.exchange,
     value: holding.currentValue,
     investedValue: holding.investedValue,
     weight: currentValue ? (holding.currentValue / currentValue) * 100 : 0,
@@ -804,6 +821,7 @@ export function buildAnalytics(holdings, transactions) {
       id: holding.id,
       label: holding.stockName,
       symbol: holding.symbol,
+      exchange: holding.exchange,
       value: holding.currentValue,
       investedValue: holding.investedValue,
       profitLoss: holding.profitLoss,
@@ -816,6 +834,7 @@ export function buildAnalytics(holdings, transactions) {
     id: trade.id,
     label: trade.stockName,
     symbol: trade.symbol,
+    exchange: trade.exchange,
     sellDate: trade.sellDate,
     soldQuantity: trade.soldQuantity,
     realizedProfit: trade.realizedProfit,
@@ -1080,6 +1099,12 @@ function readSort(value, fallback) {
   const allowed = new Set([
     "valueDesc",
     "valueAsc",
+    "unitsDesc",
+    "unitsAsc",
+    "avgbuyDesc",
+    "avgbuyAsc",
+    "costDesc",
+    "costAsc",
     "returnDesc",
     "returnAsc",
     "profitDesc",

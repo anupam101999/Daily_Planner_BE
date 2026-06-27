@@ -37,6 +37,7 @@ test("FIFO consumes the oldest buy lots and preserves the remaining cost basis",
   assert.equal(position.quantity, 50);
   assert.equal(position.investedValue, 6000);
   assert.equal(position.averagePrice, 120);
+  assert.equal(position.charges, 0);
   assert.equal(position.soldCost, 16100);
   assert.equal(position.sellValue, 20850);
   assert.equal(position.realizedProfit, 4750);
@@ -53,7 +54,8 @@ test("open average price ignores fully sold earlier lots", () => {
   const position = buildPosition(asset, rows);
   assert.equal(position.quantity, 430);
   assert.equal(position.investedValue, 50528.9);
-  assert.equal(position.averagePrice, 50528.9 / 430);
+  assert.equal(position.averagePrice, 117.37);
+  assert.equal(position.charges, 59.8);
   assert.equal(position.closedTrades[0].averagePrice, 156.6919);
 });
 
