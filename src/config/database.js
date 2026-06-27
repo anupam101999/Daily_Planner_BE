@@ -342,6 +342,54 @@ async function repairLegacyPlannerSchema() {
   await pool.query(`
     do $$
     begin
+      if to_regclass('public.daily_setting') is not null then
+        delete from public.daily_setting a
+        using public.daily_setting b
+        where a.id = b.id
+          and a.ctid > b.ctid;
+
+        update public.daily_setting set id = 'shared_dashboard' where id is null;
+        alter table public.daily_setting alter column id set not null;
+        alter table public.daily_setting alter column daily_target_minutes set default 240;
+        update public.daily_setting set daily_target_minutes = 240 where daily_target_minutes is null;
+        alter table public.daily_setting alter column daily_target_minutes set not null;
+        alter table public.daily_setting alter column weekly_target_minutes set default 1200;
+        update public.daily_setting set weekly_target_minutes = 1200 where weekly_target_minutes is null;
+        alter table public.daily_setting alter column weekly_target_minutes set not null;
+        alter table public.daily_setting alter column updated_at set default now();
+        update public.daily_setting set updated_at = now() where updated_at is null;
+        alter table public.daily_setting alter column updated_at set not null;
+
+        if not exists (
+          select 1
+          from pg_constraint
+          where conrelid = 'public.daily_setting'::regclass
+            and contype = 'p'
+        ) then
+          alter table public.daily_setting add constraint daily_setting_pkey primary key (id);
+        end if;
+
+        if not exists (
+          select 1
+          from pg_constraint
+          where conrelid = 'public.daily_setting'::regclass
+            and conname = 'daily_setting_daily_target_positive'
+        ) then
+          alter table public.daily_setting
+            add constraint daily_setting_daily_target_positive check (daily_target_minutes > 0);
+        end if;
+
+        if not exists (
+          select 1
+          from pg_constraint
+          where conrelid = 'public.daily_setting'::regclass
+            and conname = 'daily_setting_weekly_target_positive'
+        ) then
+          alter table public.daily_setting
+            add constraint daily_setting_weekly_target_positive check (weekly_target_minutes > 0);
+        end if;
+      end if;
+
       if to_regclass('public.daily_user') is not null then
         alter table public.daily_user alter column id set not null;
         alter table public.daily_user alter column name set not null;

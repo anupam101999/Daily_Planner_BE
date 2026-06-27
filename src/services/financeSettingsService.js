@@ -14,13 +14,21 @@ export async function getFinanceSettings() {
 
 export async function saveFinanceSettings(settings) {
   const financeQuoteProvider = normalizeQuoteProvider(settings.financeQuoteProvider);
-  const result = await pool.query(
-    `insert into daily_setting (id, finance_quote_provider, updated_at)
-     values ('shared_dashboard', $1, now())
-     on conflict (id) do update set finance_quote_provider = excluded.finance_quote_provider, updated_at = now()
-     returning finance_quote_provider as "financeQuoteProvider"`,
+  let result = await pool.query(
+    `update daily_setting
+        set finance_quote_provider = $1, updated_at = now()
+      where id = 'shared_dashboard'
+      returning finance_quote_provider as "financeQuoteProvider"`,
     [financeQuoteProvider],
   );
+  if (!result.rowCount) {
+    result = await pool.query(
+      `insert into daily_setting (id, finance_quote_provider, updated_at)
+       values ('shared_dashboard', $1, now())
+       returning finance_quote_provider as "financeQuoteProvider"`,
+      [financeQuoteProvider],
+    );
+  }
   return normalizeFinanceSettings(result.rows[0] || {});
 }
 
