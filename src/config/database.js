@@ -3,10 +3,15 @@ import pg from "pg";
 const { Pool } = pg;
 const databaseUrl = process.env.DATABASE_URL;
 const databaseHost = process.env.DB_HOST;
+const databaseSchema = process.env.DB_SCHEMA || "public";
 const isLocalHost = !databaseHost || ["localhost", "127.0.0.1", "::1"].includes(databaseHost);
 const useSsl = process.env.DB_SSL
   ? process.env.DB_SSL === "true"
   : Boolean(databaseUrl || !isLocalHost);
+
+if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(databaseSchema)) {
+  throw new Error("DB_SCHEMA must be a valid PostgreSQL identifier");
+}
 
 export const pool = new Pool({
   connectionString: databaseUrl,
@@ -17,6 +22,7 @@ export const pool = new Pool({
   port: Number(process.env.DB_PORT || 5432),
   max: Number(process.env.DB_POOL_MAX || 1),
   connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS || 5000),
+  options: `-c search_path=${databaseSchema}`,
   ssl: useSsl ? { rejectUnauthorized: false } : false,
 });
 
