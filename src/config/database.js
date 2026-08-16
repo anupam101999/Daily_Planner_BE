@@ -13,7 +13,20 @@ if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(databaseSchema)) {
   throw new Error("DB_SCHEMA must be a valid PostgreSQL identifier");
 }
 
-export const pool = new Pool({
+const configuredClients = new WeakSet();
+
+function quoteIdent(identifier) {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+async function configureClient(client) {
+  if (configuredClients.has(client)) return;
+  await client.query(`create schema if not exists ${quoteIdent(databaseSchema)}`);
+  await client.query(`set search_path to ${quoteIdent(databaseSchema)}`);
+  configuredClients.add(client);
+}
+
+const basePool = new Pool({
   connectionString: databaseUrl,
   host: databaseHost,
   database: process.env.DB_NAME || "postgres",
@@ -22,9 +35,32 @@ export const pool = new Pool({
   port: Number(process.env.DB_PORT || 5432),
   max: Number(process.env.DB_POOL_MAX || 1),
   connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS || 5000),
-  options: `-c search_path=${databaseSchema}`,
   ssl: useSsl ? { rejectUnauthorized: false } : false,
 });
+
+const baseConnect = basePool.connect.bind(basePool);
+
+basePool.connect = async (...args) => {
+  const client = await baseConnect(...args);
+  try {
+    await configureClient(client);
+    return client;
+  } catch (error) {
+    client.release(error);
+    throw error;
+  }
+};
+
+basePool.query = async (...args) => {
+  const client = await basePool.connect();
+  try {
+    return await client.query(...args);
+  } finally {
+    client.release();
+  }
+};
+
+export const pool = basePool;
 
 export async function initDatabase() {
   if (!databaseUrl && !process.env.DB_HOST) {
